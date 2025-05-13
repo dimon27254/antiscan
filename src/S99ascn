@@ -1,0 +1,378 @@
+#!/bin/sh
+
+RED_COLOR="\033[1;31m"
+GREEN_COLOR="\033[1;32m"
+YELLOW_COLOR="\033[1;33m"
+BOLD_TEXT="\033[1m"
+NO_STYLE="\033[0m"
+CONFIG_FILE="/opt/etc/ascn.conf"
+CONFIG_FILE_TEMP="/tmp/ascn.conf.tmp"
+ASCN_TEMP_FILE="/tmp/ascn.run"
+ASCN_LOCK_FILE="/tmp/ascn.lock"
+
+read_config() {
+  source "$CONFIG_FILE"
+  if [ -f "$CONFIG_FILE_TEMP" ]; then
+    source "$CONFIG_FILE_TEMP"
+  fi
+}
+
+read_config
+
+start() {
+  if ascn_is_running; then
+    echo "Antiscan уже работает" >&2
+    exit 1
+  else
+
+    if config_is_reloading; then
+      echo "Запуск Antiscan невозможен, пока идёт обновление конфигурации" >&2
+      exit 2
+    fi
+
+    load_kernel_modules
+    write_temp_config
+    create_ipsets
+    add_rules
+    create_status_file
+    echo "Antiscan запущен"
+  fi
+}
+
+stop() {
+  if ! ascn_is_running; then
+    echo "Antiscan не запущен" >&2
+  else
+
+    if config_is_reloading; then
+      echo "Остановка Antiscan невозможна, пока идёт обновление конфигурации" >&2
+      exit 2
+    fi
+
+    remove_rules
+    destroy_ipsets
+    destroy_temp_config
+    remove_status_file
+    echo "Antiscan остановлен"
+  fi
+}
+
+load_kernel_modules() {
+  if [ -z "$(lsmod 2>/dev/null | grep "xt_recent ")" ]; then
+    xtrecent_mod_path=$(find "/lib/modules/$KERNEL" -name "xt_recent.ko*")
+    if [ -n "$xtrecent_mod_path" ]; then
+      insmod "$xtrecent_mod_path" >/dev/null 2>&1
+      echo "xt_recent.ko загружен"
+    else
+      echo "Не удалось найти модуль ядра xt_recent.ko" >&2
+      exit 1
+    fi
+  fi
+
+  if [ -z "$(lsmod 2>/dev/null | grep "xt_multiport ")" ]; then
+    multiport_mod_path=$(find "/lib/modules/$KERNEL" -name "xt_multiport.ko*")
+    if [ -n "$multiport_mod_path" ]; then
+      insmod "$multiport_mod_path" >/dev/null 2>&1
+      echo "xt_multiport.ko загружен"
+    else
+      echo "Не удалось найти модуль ядра xt_multiport.ko" >&2
+      exit 1
+    fi
+  fi
+}
+
+write_temp_config() {
+  echo "ISP_INTERFACES=\"$ISP_INTERFACES\"" >"$CONFIG_FILE_TEMP"
+  echo "PORTS=\"$PORTS\"" >>"$CONFIG_FILE_TEMP"
+  echo "RECENT_CONNECTIONS_TIME=$RECENT_CONNECTIONS_TIME" >>"$CONFIG_FILE_TEMP"
+  echo "RECENT_CONNECTIONS_HITCOUNT=$RECENT_CONNECTIONS_HITCOUNT" >>"$CONFIG_FILE_TEMP"
+  echo "RECENT_CONNECTIONS_LIMIT=$RECENT_CONNECTIONS_LIMIT" >>"$CONFIG_FILE_TEMP"																				 
+  echo "RECENT_CONNECTIONS_BANTIME=$RECENT_CONNECTIONS_BANTIME" >>"$CONFIG_FILE_TEMP"
+  echo "DIFFERENT_IP_CANDIDATES_STORAGETIME=$DIFFERENT_IP_CANDIDATES_STORAGETIME" >>"$CONFIG_FILE_TEMP"
+  echo "DIFFERENT_IP_THRESHOLD=$DIFFERENT_IP_THRESHOLD" >>"$CONFIG_FILE_TEMP"
+  echo "SUBNETS_BANTIME=$SUBNETS_BANTIME" >>"$CONFIG_FILE_TEMP"
+}
+
+destroy_temp_config() {
+  rm -f "$CONFIG_FILE_TEMP"
+  source "$CONFIG_FILE"
+}
+
+_iptables() {
+  ACTION=$1
+  shift 1
+  RULE="$@"
+
+  iptables -C $RULE 2>/dev/null
+  exists=$?
+
+  if [ "$ACTION" == "-I" ]; then
+    if [ $exists -ne 0 ]; then
+      iptables $ACTION $RULE
+    fi
+  elif [ "$ACTION" == "-D" ] && [ $exists -eq 0 ]; then
+    iptables $ACTION $RULE
+  fi
+}
+
+IPTABLES_RULE_1="-p tcp -m multiport --dports $PORTS -m conntrack --ctstate NEW -m recent --name scanners --set"
+IPTABLES_RULE_2="-p tcp -m multiport --dports $PORTS -m conntrack --ctstate NEW -m recent --name scanners --update --seconds $RECENT_CONNECTIONS_TIME --hitcount $RECENT_CONNECTIONS_HITCOUNT -j SET --add-set ascn_ips src"
+IPTABLES_RULE_3="-p tcp -m multiport --dports $PORTS -m connlimit --connlimit-above $RECENT_CONNECTIONS_LIMIT -j SET --add-set ascn_ips src"
+IPTABLES_RULE_4="-p tcp -m multiport --dports $PORTS -m set --match-set ascn_ips src -j DROP"
+IPTABLES_RULE_5="-p tcp -m multiport --dports $PORTS -j SET --add-set ascn_candidates src"
+IPTABLES_RULE_6="-p tcp -m multiport --dports $PORTS -m set --match-set ascn_subnets src -j DROP"
+
+add_rules() {
+  for INTERFACE in $ISP_INTERFACES; do
+    _iptables -I INPUT -w -i $INTERFACE $IPTABLES_RULE_1
+    _iptables -I INPUT -w -i $INTERFACE $IPTABLES_RULE_2
+    _iptables -I INPUT -w -i $INTERFACE $IPTABLES_RULE_3
+    _iptables -I INPUT -w -i $INTERFACE $IPTABLES_RULE_4
+    _iptables -I INPUT -w -i $INTERFACE $IPTABLES_RULE_5
+    _iptables -I INPUT -w -i $INTERFACE $IPTABLES_RULE_6
+  done
+}
+
+remove_rules() {
+  for INTERFACE in $ISP_INTERFACES; do
+    _iptables -D INPUT -w -i $INTERFACE $IPTABLES_RULE_1
+    _iptables -D INPUT -w -i $INTERFACE $IPTABLES_RULE_2
+    _iptables -D INPUT -w -i $INTERFACE $IPTABLES_RULE_3
+    _iptables -D INPUT -w -i $INTERFACE $IPTABLES_RULE_4
+    _iptables -D INPUT -w -i $INTERFACE $IPTABLES_RULE_5
+    _iptables -D INPUT -w -i $INTERFACE $IPTABLES_RULE_6
+  done
+}
+
+create_ipsets() {
+  if [ -z "$(ipset --quiet list ascn_ips)" ]; then
+    ipset create ascn_ips hash:ip timeout $RECENT_CONNECTIONS_BANTIME
+  fi
+
+  if [ -z "$(ipset --quiet list ascn_candidates)" ]; then
+    ipset create ascn_candidates hash:ip timeout $DIFFERENT_IP_CANDIDATES_STORAGETIME
+  fi
+
+  if [ -z "$(ipset --quiet list ascn_subnets)" ]; then
+    ipset create ascn_subnets hash:net timeout $SUBNETS_BANTIME
+  fi
+}
+
+destroy_ipsets() {
+  if [ -n "$(ipset --quiet list ascn_ips)" ]; then
+    ipset destroy ascn_ips
+  fi
+
+  if [ -n "$(ipset --quiet list ascn_candidates)" ]; then
+    ipset destroy ascn_candidates
+  fi
+
+  if [ -n "$(ipset --quiet list ascn_subnets)" ]; then
+    ipset destroy ascn_subnets
+  fi
+}
+
+read_ip_candidates() {
+  ASCN_REGEXP_FILE="/tmp/ascn.regexp"
+  if config_is_reloading; then
+    echo "Работа с адресами-кандидатами невозможна, пока идёт обновление конфигурации Antiscan" >&2
+    exit 2
+  else
+    if [ -n "$(ipset --quiet list ascn_ips)" ] && [ -n "$(ipset --quiet list ascn_candidates)" ] && [ -n "$(ipset --quiet list ascn_subnets)" ]; then
+      ipset_members_sorted="$(ipset list ascn_candidates | tail -n +8 | sort)"
+      if [ -f "$ASCN_REGEXP_FILE" ]; then rm "$ASCN_REGEXP_FILE"; fi
+      echo "$ipset_members_sorted" | grep -oE '^([0-9]{1,3}[\.]){3}' | uniq -c | while read count subnet_number; do
+        if [ "$count" -ge "$DIFFERENT_IP_THRESHOLD" ]; then
+          echo -n "${subnet_number}[0-9]{1,3}|" >>"$ASCN_REGEXP_FILE"
+          ipset add ascn_subnets "${subnet_number}0/24" 2>/dev/null
+        fi
+      done
+      if [ -s "$ASCN_REGEXP_FILE" ]; then
+        ips_regexp="$(cat $ASCN_REGEXP_FILE | sed 's/.$//')"
+        ipset flush ascn_candidates
+        echo "$ipset_members_sorted" | grep -vE "^(${ips_regexp})" | xargs -L1 ipset -exist add ascn_candidates
+        rm "$ASCN_REGEXP_FILE"
+      fi
+    fi
+  fi
+}
+
+create_status_file() {
+  echo "1" >"$ASCN_TEMP_FILE"
+}
+
+remove_status_file() {
+  if ascn_is_running; then
+    rm "$ASCN_TEMP_FILE"
+  fi
+}
+
+create_lock_file() {
+  echo "1" >"$ASCN_LOCK_FILE"
+}
+
+remove_lock_file() {
+  if config_is_reloading; then
+    rm "$ASCN_LOCK_FILE"
+  fi
+}
+
+ascn_is_running() {
+  if [ -f "$ASCN_TEMP_FILE" ]; then
+    return 0
+  else
+    return 1
+  fi
+}
+
+config_is_reloading() {
+  if [ -f "$ASCN_LOCK_FILE" ]; then
+    return 0
+  else
+    return 1
+  fi
+}
+
+get_status() {
+  echo -n "Статус Antiscan: "
+  if ascn_is_running; then
+    if config_is_reloading; then
+      printf "${YELLOW_COLOR}обновление конфигурации${NO_STYLE}\n"
+    else
+      banned_ip_count="$(ipset list ascn_ips | tail -n +8 | grep -c '^')"
+      banned_subnets_count="$(ipset list ascn_subnets | tail -n +8 | grep -c '^')"
+      printf "${GREEN_COLOR}работает${NO_STYLE}\n"
+      printf "Заблокировано IP: ${BOLD_TEXT}$banned_ip_count${NO_STYLE}\n"
+      printf "Заблокировано подсетей: ${BOLD_TEXT}$banned_subnets_count${NO_STYLE}\n"
+    fi
+  else
+    printf "${RED_COLOR}не запущен${NO_STYLE}\n"
+  fi
+}
+
+show_ipsets() {
+  case "$1" in
+  ips | subnets)
+    if ascn_is_running; then
+      if config_is_reloading; then
+        echo "Просмотр данных недоступен во время обновления конфигурации Antiscan" >&2
+      else
+        ASCN_IPSET_TEMP_FILE="/tmp/ascn_ipset.tmp"
+        text="IP"
+		text_1="IP"
+        if [ "$1" == "subnets" ]; then
+          text="подсети"
+		  text_1="подсетей"
+        fi
+        ipset list ascn_$1 -s | tail -n +8 >$ASCN_IPSET_TEMP_FILE
+        banned_count="$(grep -c '^' $ASCN_IPSET_TEMP_FILE)"
+        if [ "$banned_count" -eq 0 ]; then
+          echo "Заблокированные ${text} отсутствуют"
+        else
+          echo "Заблокированные ${text}:"
+          cat $ASCN_IPSET_TEMP_FILE
+		  printf "Заблокировано ${text_1}: ${BOLD_TEXT}${banned_count}${NO_STYLE}\n"
+        fi
+        rm $ASCN_IPSET_TEMP_FILE
+      fi
+    else
+      echo "Antiscan не запущен" >&2
+    fi
+    ;;
+  *)
+    echo "Использование: $0 list {ips|subnets}"
+    ;;
+  esac
+}
+
+update_iptables() {
+  if ! ascn_is_running; then
+    exit 1
+  else
+    wait_timeout=15
+    while config_is_reloading && [ "$wait_timeout" -gt 0 ]; do
+      if [ $wait_timeout -eq 15 ]; then echo -n "Идет обновление конфигурации Antiscan, пробуем восстановить правила за 15 секунд... " >&2; fi
+      wait_timeout=$((wait_timeout - 1))
+      sleep 1
+    done
+    if config_is_reloading; then
+      echo "неудачно" >&2
+      exit 2
+    else
+      if [ $wait_timeout -ne 15 ]; then echo "успешно" >&2; fi
+      add_rules
+    fi
+  fi
+}
+
+update_ipset_timeout() {
+  set_name="$1"
+  old_timeout="$2"
+  new_timeout="$3"
+
+  if [ "$old_timeout" -ne "$new_timeout" ]; then
+    tmp_file="/tmp/${set_name}.txt"
+    ipset save "$set_name" >"$tmp_file"
+    sed -i "s/maxelem 65536 timeout $old_timeout/maxelem 65536 timeout $new_timeout/" "$tmp_file"
+    ipset destroy "$set_name"
+    ipset restore <"$tmp_file"
+    rm "$tmp_file"
+  fi
+}
+
+reload_config() {
+  if ! ascn_is_running; then
+    echo "Antiscan не запущен" >&2
+    exit 1
+  else
+    if config_is_reloading; then
+      echo "Процесс обновления конфигурации Antiscan уже запущен" >&2
+      exit 2
+    else
+      create_lock_file
+      ascn_old_timeout=$RECENT_CONNECTIONS_BANTIME
+      ascn_candidates_old_timeout=$DIFFERENT_IP_CANDIDATES_STORAGETIME
+      ascn_subnets_old_timeout=$SUBNETS_BANTIME
+      remove_rules
+      destroy_temp_config
+      read_config
+      write_temp_config
+      update_ipset_timeout "ascn_ips" "$ascn_old_timeout" "$RECENT_CONNECTIONS_BANTIME"
+      update_ipset_timeout "ascn_candidates" "$ascn_candidates_old_timeout" "$DIFFERENT_IP_CANDIDATES_STORAGETIME"
+      update_ipset_timeout "ascn_subnets" "$ascn_subnets_old_timeout" "$SUBNETS_BANTIME"
+      add_rules
+      remove_lock_file
+    fi
+  fi
+}
+
+case "$1" in
+start)
+  start
+  ;;
+stop)
+  stop
+  ;;
+restart)
+  stop
+  start
+  ;;
+status)
+  get_status
+  ;;
+list)
+  show_ipsets $2
+  ;;
+reload)
+  reload_config
+  ;;
+update_rules)
+  update_iptables
+  ;;
+read_candidates)
+  read_ip_candidates
+  ;;
+*)
+  echo "Использование: $0 {start|stop|restart|status|list|reload|update_rules|read_candidates}"
+  ;;
+esac
