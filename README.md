@@ -17,11 +17,12 @@
 ### Установка:
 1. **Офлайн вариант:**
 	- Скачать пакет и загрузить на устройство/внешний накопитель
-	- Выполнить команду `opkg install "/путь_к_пакету/antiscan_1.0_all.ipk"`
+	- Выполнить команду `opkg install "/путь_к_пакету/antiscan_1.1_all.ipk"`
 2. **Онлайн вариант:**
-	- Выполнить команду `opkg install https://github.com/dimon27254/antiscan/releases/download/1.0/antiscan_1.0_all.ipk"`
+	- Выполнить команду `opkg install https://github.com/dimon27254/antiscan/releases/download/1.1/antiscan_1.1_all.ipk"`
 3. Указать unix-имена интерфейсов интернет-подключений в файле `"/opt/etc/ascn.conf"`. В ПО версии 4.3 и выше просмотр unix-имен интерфейсов доступен по команде `show interface {интерфейс} system-name`
-4. Запустить командой `/opt/etc/init.d/S99ascn start`
+4. **(NEW)** Настроить сохранение заблокированных IP и подсетей, если это требуется, в файле `"/opt/etc/ascn.conf"`
+5. Запустить Antiscan командой `/opt/etc/init.d/S99ascn start`
 
 ### Описание параметров в ascn.conf:
 ```
@@ -53,16 +54,26 @@ DIFFERENT_IP_CANDIDATES_STORAGETIME=864000
 DIFFERENT_IP_THRESHOLD=5
 
 # Длительность блокировки подсети в секундах:
-SUBNETS_BANTIME=864000      
+SUBNETS_BANTIME=864000
+
+# Сохранять списки заблокированных IP и подсетей в файлы. 0 - выключено, 1 - включено
+SAVE_IPSETS=0
+
+# Путь к каталогу, куда будут сохраняться списки. Пример: "/tmp/mnt/MYDISK/antiscan"
+IPSETS_SAVE_PATH=""
 ```
 > [!TIP]
 > Период чтения списка кандидатов по умолчанию равен 1 минуте. Вы можете его изменить, отредактировав задачу в файле crontab.
 > 
 > Текст задачи: `*/1 * * * * /opt/etc/init.d/S99ascn read_candidates &`
+>
+> Списки адресов по умолчанию сохраняются каждые 5 дней в 00:00. Отредактируйте соответствующую задачу, если необходимо изменить период сохранения.
+>
+> Текст задачи: `0 0 */5 * * /opt/etc/init.d/S99ascn save_ipsets &`
 
 ### Использование S99ascn:
 ```
-{start|stop|restart|status|list|reload|update_rules|read_candidates}
+{start|stop|restart|status|list|reload|update_rules|read_candidates|save_ipsets}
 start                 начать работу скрипта (создать правила, ipset'ы, начать сбор IP)
 stop                  остановить работу скрипта (удалить правила, очистить ipset'ы, отменить блокировку)
 restart               остановить и заново начать работу скрипта
@@ -71,4 +82,5 @@ list {ips|subnets}    отобразить список и количество 
 reload                обновить конфигурацию Antiscan (перечитать файл ascn.conf)
 update_rules          проверить наличие правил iptables, и добавить их при отсутствии (для hook-скрипта netfilter.d)
 read_candidates       обработать список адресов кандидатов для блокировки по подсетям (запускается вручную или по расписанию)
+save_ipsets           сохранить списки заблокированных IP и подсетей в файлы (запускается вручную или по расписанию)
 ```
