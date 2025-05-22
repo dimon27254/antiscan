@@ -10,6 +10,13 @@ CONFIG_FILE_TEMP="/tmp/ascn.conf.tmp"
 ASCN_TEMP_FILE="/tmp/ascn.run"
 ASCN_LOCK_FILE="/tmp/ascn.lock"
 
+IPTABLES_RULE_1=""
+IPTABLES_RULE_2=""
+IPTABLES_RULE_3=""
+IPTABLES_RULE_4=""
+IPTABLES_RULE_5=""
+IPTABLES_RULE_6=""
+
 read_config() {
   source "$CONFIG_FILE"
   check_config
@@ -19,6 +26,10 @@ read_config() {
 }
 
 check_config() {
+  if [ -z "$RULES_MASK" ]; then
+    RULES_MASK="255.255.255.255"
+  fi
+
   if [ -z "$SAVE_IPSETS" ]; then
     SAVE_IPSETS=0
   else
@@ -103,6 +114,7 @@ write_temp_config() {
   echo "DIFFERENT_IP_CANDIDATES_STORAGETIME=$DIFFERENT_IP_CANDIDATES_STORAGETIME" >>"$CONFIG_FILE_TEMP"
   echo "DIFFERENT_IP_THRESHOLD=$DIFFERENT_IP_THRESHOLD" >>"$CONFIG_FILE_TEMP"
   echo "SUBNETS_BANTIME=$SUBNETS_BANTIME" >>"$CONFIG_FILE_TEMP"
+  echo "RULES_MASK=\"$RULES_MASK\"" >>"$CONFIG_FILE_TEMP"
   echo "SAVE_IPSETS=$SAVE_IPSETS" >>"$CONFIG_FILE_TEMP"
   echo "IPSETS_SAVE_PATH=\"$IPSETS_SAVE_PATH\"" >>"$CONFIG_FILE_TEMP"
 }
@@ -110,6 +122,7 @@ write_temp_config() {
 destroy_temp_config() {
   SAVE_IPSETS=0
   IPSETS_SAVE_PATH=""
+  RULES_MASK="255.255.255.255"
   rm -f "$CONFIG_FILE_TEMP"
   source "$CONFIG_FILE"
 }
@@ -131,67 +144,90 @@ _iptables() {
   fi
 }
 
-IPTABLES_RULE_1="-p tcp -m multiport --dports $PORTS -m conntrack --ctstate NEW -m recent --name scanners --set"
-IPTABLES_RULE_2="-p tcp -m multiport --dports $PORTS -m conntrack --ctstate NEW -m recent --name scanners --update --seconds $RECENT_CONNECTIONS_TIME --hitcount $RECENT_CONNECTIONS_HITCOUNT -j SET --add-set ascn_ips src"
-IPTABLES_RULE_3="-p tcp -m multiport --dports $PORTS -m connlimit --connlimit-above $RECENT_CONNECTIONS_LIMIT -j SET --add-set ascn_ips src"
-IPTABLES_RULE_4="-p tcp -m multiport --dports $PORTS -m set --match-set ascn_ips src -j DROP"
-IPTABLES_RULE_5="-p tcp -m multiport --dports $PORTS -j SET --add-set ascn_candidates src"
-IPTABLES_RULE_6="-p tcp -m multiport --dports $PORTS -m set --match-set ascn_subnets src -j DROP"
+update_rules_variables() {
+  IPTABLES_RULE_1="-p tcp -m multiport --dports $PORTS -m conntrack --ctstate NEW -m recent --set --name scanners --mask $RULES_MASK"
+  IPTABLES_RULE_2="-p tcp -m multiport --dports $PORTS -m conntrack --ctstate NEW -m recent --update --seconds $RECENT_CONNECTIONS_TIME --hitcount $RECENT_CONNECTIONS_HITCOUNT --name scanners --mask $RULES_MASK -j SET --add-set ascn_ips src"
+  IPTABLES_RULE_3="-p tcp -m multiport --dports $PORTS -m connlimit --connlimit-above $RECENT_CONNECTIONS_LIMIT --connlimit-mask $RULES_MASK -j SET --add-set ascn_ips src"
+  IPTABLES_RULE_4="-p tcp -m multiport --dports $PORTS -m set --match-set ascn_ips src -j DROP"
+  IPTABLES_RULE_5="-p tcp -m multiport --dports $PORTS -j SET --add-set ascn_candidates src"
+  IPTABLES_RULE_6="-p tcp -m multiport --dports $PORTS -m set --match-set ascn_subnets src -j DROP"
+}
 
 add_rules() {
-  for INTERFACE in $ISP_INTERFACES; do
-    _iptables -I INPUT -w -t filter -i $INTERFACE $IPTABLES_RULE_1
-    _iptables -I INPUT -w -t filter -i $INTERFACE $IPTABLES_RULE_2
-    _iptables -I INPUT -w -t filter -i $INTERFACE $IPTABLES_RULE_3
-    _iptables -I INPUT -w -t filter -i $INTERFACE $IPTABLES_RULE_4
-    _iptables -I INPUT -w -t filter -i $INTERFACE $IPTABLES_RULE_5
-    _iptables -I INPUT -w -t filter -i $INTERFACE $IPTABLES_RULE_6
+  update_rules_variables
+  for CHAIN in "INPUT" "FORWARD"; do
+    for INTERFACE in $ISP_INTERFACES; do
+      _iptables -I $CHAIN -w -t filter -i $INTERFACE $IPTABLES_RULE_1
+      _iptables -I $CHAIN -w -t filter -i $INTERFACE $IPTABLES_RULE_2
+      _iptables -I $CHAIN -w -t filter -i $INTERFACE $IPTABLES_RULE_3
+      _iptables -I $CHAIN -w -t filter -i $INTERFACE $IPTABLES_RULE_4
+      _iptables -I $CHAIN -w -t filter -i $INTERFACE $IPTABLES_RULE_5
+      _iptables -I $CHAIN -w -t filter -i $INTERFACE $IPTABLES_RULE_6
+    done
   done
 }
 
 remove_rules() {
-  for INTERFACE in $ISP_INTERFACES; do
-    _iptables -D INPUT -w -t filter -i $INTERFACE $IPTABLES_RULE_1
-    _iptables -D INPUT -w -t filter -i $INTERFACE $IPTABLES_RULE_2
-    _iptables -D INPUT -w -t filter -i $INTERFACE $IPTABLES_RULE_3
-    _iptables -D INPUT -w -t filter -i $INTERFACE $IPTABLES_RULE_4
-    _iptables -D INPUT -w -t filter -i $INTERFACE $IPTABLES_RULE_5
-    _iptables -D INPUT -w -t filter -i $INTERFACE $IPTABLES_RULE_6
+  update_rules_variables
+  for CHAIN in "INPUT" "FORWARD"; do
+    for INTERFACE in $ISP_INTERFACES; do
+      _iptables -D $CHAIN -w -t filter -i $INTERFACE $IPTABLES_RULE_1
+      _iptables -D $CHAIN -w -t filter -i $INTERFACE $IPTABLES_RULE_2
+      _iptables -D $CHAIN -w -t filter -i $INTERFACE $IPTABLES_RULE_3
+      _iptables -D $CHAIN -w -t filter -i $INTERFACE $IPTABLES_RULE_4
+      _iptables -D $CHAIN -w -t filter -i $INTERFACE $IPTABLES_RULE_5
+      _iptables -D $CHAIN -w -t filter -i $INTERFACE $IPTABLES_RULE_6
+    done
   done
 }
 
 create_ipsets() {
   if [ -z "$(ipset --quiet list ascn_candidates)" ]; then
-    ascn_cands_timeout=$([ "$DIFFERENT_IP_CANDIDATES_STORAGETIME" -ne 0 ] && echo "timeout "$DIFFERENT_IP_CANDIDATES_STORAGETIME"")
-    ipset create ascn_candidates hash:ip $ascn_cands_timeout
+    add_ipset "ascn_candidates" "hash:ip" $DIFFERENT_IP_CANDIDATES_STORAGETIME
   fi
 
   if [ -z "$(ipset --quiet list ascn_ips)" ]; then
-    if [ "$SAVE_IPSETS" -ne 1 ]; then
-      ascn_ips_timeout=$([ "$RECENT_CONNECTIONS_BANTIME" -ne 0 ] && echo "timeout "$RECENT_CONNECTIONS_BANTIME"")
-      ipset create ascn_ips hash:ip $ascn_ips_timeout
-    else
-      ascn_ips_file="$IPSETS_SAVE_PATH/ipset_ascn_ips.txt"
-      if [ -s "$ascn_ips_file" ] && restore_ipset_from_file "ascn_ips" "$ascn_ips_file"; then
-        :
-      else
-        ipset create ascn_ips hash:ip
-      fi
-    fi
+    add_ipset "ascn_ips" "hash:ip" $RECENT_CONNECTIONS_BANTIME
   fi
 
   if [ -z "$(ipset --quiet list ascn_subnets)" ]; then
-    if [ "$SAVE_IPSETS" -ne 1 ]; then
-      ascn_subnets_timeout=$([ "$SUBNETS_BANTIME" -ne 0 ] && echo "timeout "$SUBNETS_BANTIME"")
-      ipset create ascn_subnets hash:net $ascn_subnets_timeout
-    else
-      ascn_subnets_file="$IPSETS_SAVE_PATH/ipset_ascn_subnets.txt"
-      if [ -s "$ascn_subnets_file" ] && restore_ipset_from_file "ascn_subnets" "$ascn_subnets_file"; then
-        :
-      else
-        ipset create ascn_subnets hash:net
-      fi
+    add_ipset "ascn_subnets" "hash:net" $SUBNETS_BANTIME
+  fi
+}
+
+add_ipset() {
+  ipset_name="$1"
+  ipset_type="$2"
+  ipset_timeout="$3"
+  ipset_timeout_string=""
+  ipset_file="$IPSETS_SAVE_PATH/ipset_$ipset_name.txt"
+  should_add_ipset=1
+
+  case $ipset_name in
+  "ascn_candidates")
+    ipset_timeout_string=$([ "$DIFFERENT_IP_CANDIDATES_STORAGETIME" -ne 0 ] && echo "timeout "$DIFFERENT_IP_CANDIDATES_STORAGETIME"")
+    ;;
+  "ascn_ips")
+    ipset_timeout_string=$([ "$RECENT_CONNECTIONS_BANTIME" -ne 0 ] && echo "timeout "$RECENT_CONNECTIONS_BANTIME"")
+    ;;
+  "ascn_subnets")
+    ipset_timeout_string=$([ "$SUBNETS_BANTIME" -ne 0 ] && echo "timeout "$SUBNETS_BANTIME"")
+    ;;
+  esac
+
+  if [ "$SAVE_IPSETS" -eq 1 ] && [ -s "$ipset_file" ]; then
+    ipset_old_timeout=$(grep -oP '^create.*timeout\s+\K\d+$' "$ipset_file")
+    if [ -z "$ipset_old_timeout" ]; then
+      ipset_old_timeout=0
     fi
+    update_ipset_timeout "$ipset_name" "$ipset_old_timeout" "$ipset_timeout" "$ipset_file" 0
+    if restore_ipset_from_file "$ipset_name" "$ipset_file"; then
+      should_add_ipset=0
+    fi
+  fi
+
+  if [ "$should_add_ipset" -eq 1 ]; then
+    ipset create $ipset_name $ipset_type $ipset_timeout_string
   fi
 }
 
@@ -362,7 +398,7 @@ export_ipsets() {
         echo "Экспорт ipset в файл недоступен во время обновления конфигурации Antiscan" >&2
         exit 2
       else
-        for set_name in "ascn_ips" "ascn_subnets"; do
+        for set_name in "ascn_candidates" "ascn_ips" "ascn_subnets"; do
           ipset_filename="$IPSETS_SAVE_PATH/ipset_$set_name.txt"
           banned_count="$(ipset list $set_name | tail -n +8 | grep -c '^')"
           if [ "$banned_count" -ne 0 ]; then
@@ -387,26 +423,31 @@ update_ipset_timeout() {
   set_name="$1"
   old_timeout="$2"
   new_timeout="$3"
-  use_saving_old="$4"
-  use_saving_new="$5"
+  ipset_file="$4"
+  is_reloading="$5"
 
-  if [ "$old_timeout" -ne "$new_timeout" ] || [ "$use_saving_old" -ne "$use_saving_new" ]; then
-    tmp_file="/tmp/${set_name}.txt"
-    ipset save "$set_name" >"$tmp_file"
-    if [ "$use_saving_new" -eq 1 ] || [ "$new_timeout" -eq 0 ]; then
-      sed -i "s/ timeout [0-9]\+//" "$tmp_file"
+  if [ "$old_timeout" -ne "$new_timeout" ]; then
+
+    if [ "$is_reloading" -eq 1 ]; then
+      ipset_file="/tmp/${set_name}.txt"
+      ipset save "$set_name" >"$ipset_file"
+    fi
+
+    if [ "$new_timeout" -eq 0 ]; then
+      sed -i "s/ timeout [0-9]\+//" "$ipset_file" && echo "Для списка $set_name удалено время хранения записей"
     else
-      if [ "$use_saving_new" -eq 0 ]; then
-        if [ "$use_saving_old" -eq 1 ] || [ $old_timeout -eq 0 ]; then
-          sed -i "s/maxelem 65536\$/maxelem 65536 timeout $new_timeout/" "$tmp_file"
-        else
-          sed -i "s/maxelem 65536 timeout $old_timeout/maxelem 65536 timeout $new_timeout/" "$tmp_file"
-        fi
+      if [ $old_timeout -eq 0 ]; then
+        sed -i "s/maxelem 65536\$/maxelem 65536 timeout $new_timeout/" "$ipset_file" && echo "Для списка $set_name установлено время хранения записей $new_timeout"
+      else
+        sed -i "s/ timeout [0-9]\+/ timeout $new_timeout/" "$ipset_file" && echo "Для списка $set_name обновлено время хранения записей. Было $old_timeout, стало $new_timeout"
       fi
     fi
-    ipset destroy "$set_name"
-    restore_ipset_from_file "$set_name" "$tmp_file"
-    rm "$tmp_file"
+
+    if [ "$is_reloading" -eq 1 ]; then
+      ipset destroy "$set_name"
+      restore_ipset_from_file "$set_name" "$ipset_file"
+      rm "$ipset_file"
+    fi
   fi
 }
 
@@ -423,18 +464,54 @@ reload_config() {
       ascn_old_timeout=$RECENT_CONNECTIONS_BANTIME
       ascn_candidates_old_timeout=$DIFFERENT_IP_CANDIDATES_STORAGETIME
       ascn_subnets_old_timeout=$SUBNETS_BANTIME
-      save_ipsets_old_value=$SAVE_IPSETS
       remove_rules
       destroy_temp_config
       read_config
       write_temp_config
-      update_ipset_timeout "ascn_candidates" "$ascn_candidates_old_timeout" "$DIFFERENT_IP_CANDIDATES_STORAGETIME" 0 0
-      update_ipset_timeout "ascn_ips" "$ascn_old_timeout" "$RECENT_CONNECTIONS_BANTIME" "$save_ipsets_old_value" "$SAVE_IPSETS"
-      update_ipset_timeout "ascn_subnets" "$ascn_subnets_old_timeout" "$SUBNETS_BANTIME" "$save_ipsets_old_value" "$SAVE_IPSETS"
+      update_ipset_timeout "ascn_candidates" "$ascn_candidates_old_timeout" "$DIFFERENT_IP_CANDIDATES_STORAGETIME" "" 1
+      update_ipset_timeout "ascn_ips" "$ascn_old_timeout" "$RECENT_CONNECTIONS_BANTIME" "" 1
+      update_ipset_timeout "ascn_subnets" "$ascn_subnets_old_timeout" "$SUBNETS_BANTIME" "" 1
       add_rules
       remove_lock_file
     fi
   fi
+}
+
+flush_ipsets() {
+  case "$1" in
+  "candidates" | "ips" | "subnets" | "")
+    if ascn_is_running; then
+      if config_is_reloading; then
+        echo "Очистка списков недоступна во время обновления конфигурации Antiscan" >&2
+      else
+        ipset_to_clear="$1"
+        question_text=""
+        if [ -z "$ipset_to_clear" ]; then
+          ipset_to_clear="candidates ips subnets"
+          question_text="Очистить все списки адресов? (Y/N): "
+        else
+          ipset_readable_name=""
+          [ "$ipset_to_clear" == "candidates" ] && ipset_readable_name="адресов-кандидатов на блокировку"
+          [ "$ipset_to_clear" == "ips" ] && ipset_readable_name="заблокированных IP"
+          [ "$ipset_to_clear" == "subnets" ] && ipset_readable_name="заблокированных подсетей"
+          question_text="Очистить список ${ipset_readable_name}? (Y/N): "
+        fi
+        if read -p "$question_text" confirm && [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]; then
+          for set in $ipset_to_clear; do
+            name="ascn_$set"
+            set_filename="$IPSETS_SAVE_PATH/ipset_$name.txt"
+            ipset flush $name && [ -f "$set_filename" ] && rm "$set_filename"
+          done
+        fi
+      fi
+    else
+      echo "Antiscan не запущен" >&2
+    fi
+    ;;
+  *)
+    echo "Использование: $0 flush [candidates|ips|subnets]"
+    ;;
+  esac
 }
 
 case "$1" in
@@ -457,6 +534,9 @@ list)
 reload)
   reload_config
   ;;
+flush)
+  flush_ipsets $2
+  ;;
 update_rules)
   update_iptables
   ;;
@@ -467,6 +547,6 @@ save_ipsets)
   export_ipsets
   ;;
 *)
-  echo "Использование: $0 {start|stop|restart|status|list|reload|update_rules|read_candidates|save_ipsets}"
+  echo "Использование: $0 {start|stop|restart|status|list|reload|flush|update_rules|read_candidates|save_ipsets}"
   ;;
 esac
