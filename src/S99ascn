@@ -518,6 +518,8 @@ get_status() {
       banned_ip_count="$(ipset list ascn_ips | tail -n +8 | grep -c '^')"
       banned_subnets_count="$(ipset list ascn_subnets | tail -n +8 | grep -c '^')"
       printf "\t${GREEN_COLOR}работает${NO_STYLE}\n"
+      printf "Заблокировано IP:\t${BOLD_TEXT}$banned_ip_count${NO_STYLE}\n"
+      printf "Заблокировано подсетей:\t${BOLD_TEXT}$banned_subnets_count${NO_STYLE}\n"
 
       if [ "$USE_CUSTOM_EXCLUDE_LIST" -eq 1 ] || [ "$CUSTOM_LISTS_BLOCK_MODE" == "blacklist" ] || [ "$CUSTOM_LISTS_BLOCK_MODE" == "whitelist" ]; then
         if [ "$USE_CUSTOM_EXCLUDE_LIST" -eq 1 ]; then
@@ -532,7 +534,7 @@ get_status() {
         case "$CUSTOM_LISTS_BLOCK_MODE" in
         "blacklist" | "whitelist")
           custom_set_name="ascn_custom_${CUSTOM_LISTS_BLOCK_MODE}"
-          [ "$$CUSTOM_LISTS_BLOCK_MODE" == "blacklist" ] && custom_set_type="Черный список" || custom_set_type="Белый список"
+          [ "$CUSTOM_LISTS_BLOCK_MODE" == "blacklist" ] && custom_set_type="Черный список" || custom_set_type="Белый список"
           custom_ip_count="$(ipset -q list $custom_set_name | tail -n +8 | grep -c '^')"
           if [ "$custom_ip_count" -gt 0 ]; then
             printf "${custom_set_type}:\t\t${BOLD_TEXT}$(get_ipset_member_text "$custom_ip_count")${NO_STYLE}\n"
@@ -560,9 +562,6 @@ get_status() {
         printf "${RED_COLOR}отключена${NO_STYLE}\n"
         ;;
       esac
-
-      printf "Заблокировано IP:\t${BOLD_TEXT}$banned_ip_count${NO_STYLE}\n"
-      printf "Заблокировано подсетей:\t${BOLD_TEXT}$banned_subnets_count${NO_STYLE}\n"
     fi
   else
     printf "\t${RED_COLOR}не запущен${NO_STYLE}\n"
