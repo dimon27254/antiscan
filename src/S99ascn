@@ -5,7 +5,8 @@ GREEN_COLOR="\033[1;32m"
 YELLOW_COLOR="\033[1;33m"
 BOLD_TEXT="\033[1m"
 NO_STYLE="\033[0m"
-CONFIG_FILE="/opt/etc/ascn.conf"
+ANTISCAN_DIR="/opt/etc/antiscan"
+CONFIG_FILE="$ANTISCAN_DIR/ascn.conf"
 CONFIG_FILE_TEMP="/tmp/ascn.conf.tmp"
 ASCN_TEMP_FILE="/tmp/ascn.run"
 ASCN_LOCK_FILE="/tmp/ascn.lock"
@@ -27,7 +28,7 @@ check_config() {
   [ -z "$USE_CUSTOM_EXCLUDE_LIST" ] && USE_CUSTOM_EXCLUDE_LIST=0
   [ -z "$GEOBLOCK_MODE" ] && GEOBLOCK_MODE=0
 
-  if [ -z "$IPSETS_DIRECTORY" ] && [[ "$SAVE_IPSETS" == "1" || "$CUSTOM_LISTS_BLOCK_MODE" != "0" || "$USE_CUSTOM_EXCLUDE_LIST" != "0" || "$GEOBLOCK_MODE" != "0" ]]; then
+  if [ -z "$IPSETS_DIRECTORY" ] && [[ "$SAVE_IPSETS" == "1" || "$GEOBLOCK_MODE" != "0" ]]; then
     echo "В ascn.conf не указан путь для сохранения ipset!" >&2
     exit 3
   else
@@ -64,6 +65,7 @@ start() {
     write_temp_config
     create_ipsets
     add_rules
+    update_cron
     create_status_file
     echo "Antiscan запущен"
   fi
@@ -327,11 +329,7 @@ restore_ipset_from_file() {
 
 load_custom_ipset() {
   custom_ipset_tempfile="/tmp/ipset_custom.txt"
-  custom_ipset_filename="$IPSETS_DIRECTORY/custom/$1.txt"
-  custom_ipset_directory="$IPSETS_DIRECTORY/custom"
-  if [ ! -d "$custom_ipset_directory" ]; then
-    mkdir "$custom_ipset_directory"
-  fi
+  custom_ipset_filename="$ANTISCAN_DIR/$1.txt"
   if [ -f "$custom_ipset_filename" ]; then
     custom_file_size="$(ls -l "$custom_ipset_filename" | awk '{print $5}')"
     if [ "$custom_file_size" -gt 4 ]; then
@@ -636,7 +634,7 @@ export_ipsets() {
     if ascn_is_running; then
       if config_is_reloading; then
         echo "Экспорт ipset в файл недоступен во время обновления конфигурации Antiscan" >&2
-        exit 2
+        return 2
       else
         for set_name in "ascn_candidates" "ascn_ips" "ascn_subnets"; do
           ipset_filename="$IPSETS_DIRECTORY/ipset_$set_name.txt"
@@ -644,7 +642,6 @@ export_ipsets() {
           if [ "$banned_count" -ne 0 ]; then
             if ! ipset save "$set_name" >"$ipset_filename"; then
               echo "Не удалось экспортировать ipset $set_name!" >&2
-              exit 3
             fi
           else
             if [ -f "$ipset_filename" ]; then
@@ -654,7 +651,7 @@ export_ipsets() {
         done
       fi
     else
-      exit 1
+      return 1
     fi
   fi
 }
@@ -714,6 +711,9 @@ reload_config() {
       destroy_temp_config
       read_config
       write_temp_config
+
+      update_cron
+
       update_ipset_timeout "ascn_candidates" "$ascn_candidates_old_timeout" "$DIFFERENT_IP_CANDIDATES_STORAGETIME" "" 1
       update_ipset_timeout "ascn_ips" "$ascn_old_timeout" "$RECENT_CONNECTIONS_BANTIME" "" 1
       update_ipset_timeout "ascn_subnets" "$ascn_subnets_old_timeout" "$SUBNETS_BANTIME" "" 1
@@ -803,7 +803,7 @@ flush_ipsets() {
               rm -f "$IPSETS_DIRECTORY/geo/"*
               ;;
             "custom_whitelist" | "custom_blacklist" | "custom_exclude")
-              local custom_set_filename="$IPSETS_DIRECTORY/custom/$name.txt"
+              local custom_set_filename="$ANTISCAN_DIR/$name.txt"
               [ -f "$custom_set_filename" ] && echo >"$custom_set_filename"
               ;;
             *)
@@ -866,7 +866,28 @@ update_ipsets() {
     echo "Использование: $0 update_ipsets {custom|geo}"
     ;;
   esac
+}
 
+update_cron() {
+  crontab_bin="/opt/bin/crontab"
+  if [ -f "$crontab_bin" ]; then
+    ascn_cron_file="$ANTISCAN_DIR/ascn_crontab.conf"
+    if [ -s "$ascn_cron_file" ]; then
+      tasks_from_crontab="$(crontab -l | grep 'S99ascn')"
+      tasks_from_file="$(grep 'S99ascn' $ascn_cron_file)"
+      if [ "$tasks_from_crontab" != "$tasks_from_file" ]; then
+        echo "Обновляем crontab"
+        crontab -l | sed '/S99ascn/d' >"/tmp/crontasks"
+        echo "$tasks_from_file" >>"/tmp/crontasks"
+        crontab "/tmp/crontasks"
+        rm "/tmp/crontasks"
+      fi
+    else
+      echo "Невозможно обновить crontab! Файл ascn_crontab.conf пуст." >&2
+    fi
+  else
+    echo "crontab не найден! У вас не установлен cron?" >&2
+  fi
 }
 
 case "$1" in
@@ -877,11 +898,15 @@ stop)
   stop
   ;;
 restart)
+  export_ipsets
   stop
   start
   ;;
 status)
   get_status
+  ;;
+status_nc)
+  get_status | awk '{ gsub(/\033\[[0-9;]*m/, ""); print }'
   ;;
 list)
   show_ipsets $2
@@ -904,7 +929,10 @@ save_ipsets | save)
 update_ipsets)
   update_ipsets $2
   ;;
+update_crontab)
+  update_cron
+  ;;
 *)
-  echo "Использование: $0 {start|stop|restart|status|list|reload|flush|update_rules|read_candidates|save_ipsets|update_ipsets}"
+  echo "Использование: $0 {start|stop|restart|status|list|reload|flush|update_rules|read_candidates|save_ipsets|update_ipsets|update_crontab}"
   ;;
 esac

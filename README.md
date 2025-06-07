@@ -19,9 +19,9 @@
 ### Установка:
 1. **Офлайн вариант:**
 	- Скачать пакет и загрузить на устройство/внешний накопитель
-	- Выполнить команду `opkg install "/путь_к_пакету/antiscan_1.3.1_all.ipk"`
+	- Выполнить команду `opkg install "/путь_к_пакету/antiscan_1.4_all.ipk"`
 2. **Онлайн вариант:**
-	- Выполнить команду `opkg install https://github.com/dimon27254/antiscan/releases/download/1.3.1/antiscan_1.3.1_all.ipk"`
+	- Выполнить команду `opkg install https://github.com/dimon27254/antiscan/releases/download/1.4/antiscan_1.4_all.ipk"`
 3. Указать unix-имена интерфейсов интернет-подключений в файле `"/opt/etc/ascn.conf"`. В ПО версии 4.3 и выше просмотр unix-имен интерфейсов доступен по команде `show interface {интерфейс} system-name`
 4. Настроить чтение и хранение списков адресов, если это требуется, в файле `"/opt/etc/ascn.conf"`
 5. Запустить Antiscan командой `antiscan start`
@@ -82,19 +82,19 @@ GEOBLOCK_COUNTRIES=""
 > [!TIP]
 > Период чтения списка кандидатов по умолчанию равен 1 минуте.
 > 
-> Текст задачи в cron: `*/1 * * * * /opt/etc/init.d/S99ascn read_candidates &`
+> Текст задачи в crontab: `*/1 * * * * /opt/etc/init.d/S99ascn read_candidates &`
 >
 > Списки адресов по умолчанию сохраняются каждые 5 дней в 00:00.
 >
-> Текст задачи в cron: `0 0 */5 * * /opt/etc/init.d/S99ascn save_ipsets &`
+> Текст задачи в crontab: `0 0 */5 * * /opt/etc/init.d/S99ascn save_ipsets &`
 >
 > Списки подсетей для геоблокировки по умолчанию обновляются каждые 15 дней в 00:05.
 >
-> Текст задачи в cron: `0 5 */15 * * /opt/etc/init.d/S99ascn update_ipsets geo &`
+> Текст задачи в crontab: `0 5 */15 * * /opt/etc/init.d/S99ascn update_ipsets geo &`
 
 ### Использование S99ascn:
 ```
-{start|stop|restart|status|list|reload|flush|update_rules|read_candidates|save_ipsets|update_ipsets}
+{start|stop|restart|status|list|reload|flush|update_rules|read_candidates|save_ipsets|update_ipsets|update_crontab}
 start                            начать работу скрипта (создать правила, ipset'ы, начать сбор IP)
 stop                             остановить работу скрипта (удалить правила, очистить ipset'ы, отменить блокировку)
 restart                          остановить и заново начать работу скрипта
@@ -109,4 +109,5 @@ update_rules                     проверить наличие правил 
 read_candidates                  обработать список адресов кандидатов для блокировки по подсетям (запускается вручную или по расписанию)
 save_ipsets                      сохранить списки накопленных адресов в файлы (запускается вручную или по расписанию)
 update_ipsets {custom|geo}       обновить пользовательские списки адресов или подсети для геоблокировки (запускается вручную или по расписанию)
+update_crontab                   обновить задачи Antiscan в файле crontab
 ```
