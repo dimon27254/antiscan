@@ -1,0 +1,6 @@
+#!/bin/sh
+ANTISCAN_LINK="/opt/bin/antiscan"
+/opt/etc/init.d/S99ascn stop
+if [ -L "$ANTISCAN_LINK" ]; then
+  rm "$ANTISCAN_LINK"
+fi

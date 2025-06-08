@@ -1,0 +1,5 @@
+/opt/etc/antiscan/ascn.conf
+/opt/etc/antiscan/ascn_crontab.conf
+/opt/etc/antiscan/ascn_custom_blacklist.txt
+/opt/etc/antiscan/ascn_custom_exclude.txt
+/opt/etc/antiscan/ascn_custom_whitelist.txt

@@ -1,0 +1,7 @@
+#!/bin/sh
+crontab_bin="/opt/bin/crontab"
+if [ -f "$crontab_bin" ]; then
+  crontab -l | sed '/S99ascn/d' | crontab -
+else
+  echo "crontab не найден! У вас не установлен cron?"
+fi

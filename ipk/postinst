@@ -1,0 +1,37 @@
+#!/bin/sh
+ANTISCAN_LINK="/opt/bin/antiscan"
+ANTISCAN_DIR="/opt/etc/antiscan"
+CONFIG_FILE="$ANTISCAN_DIR/ascn.conf"
+OLD_CONFIG_FILES="/opt/etc/ascn.conf-opkg /opt/etc/ascn.conf-opkg.backup"
+BOLD_TEXT="\033[1m"
+NO_STYLE="\033[0m"
+
+if [ ! -L "$ANTISCAN_LINK" ]; then
+    ln -s /opt/etc/init.d/S99ascn "$ANTISCAN_LINK"
+fi
+
+source "$CONFIG_FILE"
+if [ -n "$IPSETS_DIRECTORY" ]; then
+    ascn_custom_directory="$IPSETS_DIRECTORY/custom"
+    ascn_geo_directory="$IPSETS_DIRECTORY/geo"
+    ascn_custom_files="ascn_custom_blacklist.txt ascn_custom_whitelist.txt ascn_custom_exclude.txt"
+
+    if [ -d "$ascn_custom_directory" ]; then
+        for custom_file in $ascn_custom_files; do
+            if [ -f "$ascn_custom_directory/$custom_file" ]; then
+                mv -f "$ascn_custom_directory/$custom_file" "$ANTISCAN_DIR/$custom_file" && printf "Имеющийся $custom_file был перемещен в каталог ${BOLD_TEXT}/opt/etc/antiscan${NO_STYLE}\n"
+            fi
+        done
+        rm -r "$ascn_custom_directory"
+    fi
+
+    if [ ! -d "$ascn_geo_directory" ]; then
+        mkdir "$ascn_geo_directory"
+    fi
+fi
+
+for old_file in $OLD_CONFIG_FILES; do
+    if [ -f "$old_file" ]; then
+        rm "$old_file"
+    fi
+done
