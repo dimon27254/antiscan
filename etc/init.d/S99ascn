@@ -10,6 +10,8 @@ CONFIG_FILE="$ANTISCAN_DIR/ascn.conf"
 CONFIG_FILE_TEMP="/tmp/ascn.conf.tmp"
 ASCN_TEMP_FILE="/tmp/ascn.run"
 ASCN_LOCK_FILE="/tmp/ascn.lock"
+ASCN_GEO_LOCK_FILE="/tmp/ascn_geo.lock"
+ASCN_GEO_LOAD_ERROR_FILE="/tmp/ascn_geo_load_error"
 PATH=/opt/bin:/opt/sbin:/sbin:/usr/sbin:/bin:/usr/bin
 
 read_config() {
@@ -29,11 +31,11 @@ check_config() {
   [ -z "$GEOBLOCK_MODE" ] && GEOBLOCK_MODE=0
 
   if [ -z "$IPSETS_DIRECTORY" ] && [[ "$SAVE_IPSETS" == "1" || "$GEOBLOCK_MODE" != "0" ]]; then
-    echo "В ascn.conf не указан путь для сохранения ipset!" >&2
+    print_message "error" "В ascn.conf не указан путь для сохранения ipset!"
     exit 3
   else
     if [ "$GEOBLOCK_MODE" != 0 ] && [ -z "$GEOBLOCK_COUNTRIES" ]; then
-      echo "В ascn.conf не указаны страны для геоблокировки!" >&2
+      print_message "error" "В ascn.conf не указаны страны для геоблокировки!"
       exit 3
     else
       count=$(
@@ -41,7 +43,7 @@ check_config() {
         echo $#
       )
       if [ "$count" -gt 8 ]; then
-        echo "Количество указанных стран для геоблокировки превышает 8" >&2
+        print_message "error" "Количество указанных стран для геоблокировки превышает 8"
         exit 4
       fi
     fi
@@ -52,12 +54,16 @@ read_config
 
 start() {
   if ascn_is_running; then
-    echo "Antiscan уже работает" >&2
+    print_message "error" "Antiscan уже работает"
     exit 1
   else
-
     if config_is_reloading; then
-      echo "Запуск Antiscan невозможен, пока идёт обновление конфигурации" >&2
+      print_message "error" "Запуск Antiscan невозможен, пока идёт обновление конфигурации"
+      exit 2
+    fi
+
+    if geo_is_loading; then
+      print_message "error" "Запуск Antiscan невозможен, пока идёт обновление списков подсетей геоблокировки"
       exit 2
     fi
 
@@ -67,17 +73,22 @@ start() {
     add_rules
     update_cron
     create_status_file
-    echo "Antiscan запущен"
+    print_message "notice" "Antiscan запущен"
   fi
 }
 
 stop() {
   if ! ascn_is_running; then
-    echo "Antiscan не запущен" >&2
+    print_message "error" "Antiscan не запущен"
   else
 
     if config_is_reloading; then
-      echo "Остановка Antiscan невозможна, пока идёт обновление конфигурации" >&2
+      print_message "error" "Остановка Antiscan невозможна, пока идёт обновление конфигурации"
+      exit 2
+    fi
+
+    if geo_is_loading; then
+      print_message "error" "Остановка Antiscan невозможна, пока идёт обновление списков подсетей геоблокировки"
       exit 2
     fi
 
@@ -85,7 +96,7 @@ stop() {
     destroy_ipsets
     destroy_temp_config
     remove_status_file
-    echo "Antiscan остановлен"
+    print_message "notice" "Antiscan остановлен"
   fi
 }
 
@@ -94,9 +105,9 @@ load_kernel_modules() {
     xtrecent_mod_path=$(find "/lib/modules/$KERNEL" -name "xt_recent.ko*")
     if [ -n "$xtrecent_mod_path" ]; then
       insmod "$xtrecent_mod_path" >/dev/null 2>&1
-      echo "xt_recent.ko загружен"
+      print_message "notice" "xt_recent.ko загружен"
     else
-      echo "Не удалось найти модуль ядра xt_recent.ko" >&2
+      print_message "error" "Не удалось найти модуль ядра xt_recent.ko"
       exit 1
     fi
   fi
@@ -105,12 +116,29 @@ load_kernel_modules() {
     multiport_mod_path=$(find "/lib/modules/$KERNEL" -name "xt_multiport.ko*")
     if [ -n "$multiport_mod_path" ]; then
       insmod "$multiport_mod_path" >/dev/null 2>&1
-      echo "xt_multiport.ko загружен"
+      print_message "notice" "xt_multiport.ko загружен"
     else
-      echo "Не удалось найти модуль ядра xt_multiport.ko" >&2
+      print_message "error" "Не удалось найти модуль ядра xt_multiport.ko"
       exit 1
     fi
   fi
+}
+
+print_message() {
+  msg_type="$1"
+  msg_text="$2"
+  logger -p "${msg_type}" -t "Antiscan" "${msg_text}"
+  case $msg_type in
+  error)
+    echo "${msg_text}" >&2
+    ;;
+  notice)
+    [ -z "$3" ] && echo "${msg_text}"
+    ;;
+  warning)
+    [ "$3" == "1" ] && echo "${msg_text}" >&2
+    ;;
+  esac
 }
 
 write_temp_config() {
@@ -320,7 +348,7 @@ destroy_ipsets() {
 
 restore_ipset_from_file() {
   if ! ipset restore <"$2"; then
-    echo "Не удалось импортировать ipset $1!" >&2
+    print_message "error" "Не удалось импортировать ipset $1!"
     return 1
   else
     return 0
@@ -336,93 +364,157 @@ load_custom_ipset() {
       echo "create $1 hash:net family inet hashsize 1024 maxelem 65536" >"$custom_ipset_tempfile"
       sed "s/^/add $1 /" "$custom_ipset_filename" >>"$custom_ipset_tempfile"
       if ! ipset -! restore <"$custom_ipset_tempfile"; then
-        echo "Не удалось импортировать список $1!" >&2
+        print_message "error" "Не удалось импортировать список $1!"
       fi
       rm "$custom_ipset_tempfile"
     else
-      echo "В файле $1 отсутствуют IP-адреса." >&2
-      echo "Добавьте их и перезапустите Antiscan." >&2
+      print_message "error" "В файле $1 отсутствуют IP-адреса."
+      print_message "error" "Добавьте их и перезапустите Antiscan."
     fi
   else
     echo >"$custom_ipset_filename"
-    echo "Файл $1 отсутствовал и был создан автоматически." >&2
-    echo "Добавьте в него IP-адреса и перезапустите Antiscan." >&2
+    print_message "warning" "Файл $1 отсутствовал и был создан автоматически." 1
+    print_message "error" "Добавьте в него IP-адреса и перезапустите Antiscan."
   fi
 }
 
 load_geo_ipset() {
   geo_ipset_type="$1"
   is_geo_reloading="$2"
+  is_trying_load_geo="$3"
   geo_directory="$IPSETS_DIRECTORY/geo"
   temp_geo_ipset_path="/tmp/temp_geo_ipset.txt"
-  geo_file_not_found=0
+  unavailable_countries=""
+  load_country_failed=0
 
-  if [ ! -d "$geo_directory" ]; then
-    geo_file_not_found=1
+  if geo_is_loading; then
+    print_message "error" "Обновление списков подсетей геоблокировки уже запущено"
   else
-    for country in $GEOBLOCK_COUNTRIES; do
-      subnets_file="$geo_directory/$country.txt"
-      if [ ! -s "$subnets_file" ]; then
-        geo_file_not_found=1
-      fi
-    done
-  fi
+    create_geo_lock_file
 
-  if [ "$geo_file_not_found" -eq 1 ] || [ "$is_geo_reloading" -eq 1 ]; then
-    if [ "$is_geo_reloading" -eq 1 ]; then
-      ipset flush ascn_geo_$geo_ipset_type
-    fi
     if [ ! -d "$geo_directory" ]; then
+      unavailable_countries="${GEOBLOCK_COUNTRIES}"
       mkdir "$geo_directory"
     else
-      rm -f "$geo_directory/"*
+      for country in $GEOBLOCK_COUNTRIES; do
+        exclude_countries="${exclude_countries}! -name ${country}.txt "
+        subnets_file="$geo_directory/$country.txt"
+        if [ ! -s "$subnets_file" ]; then
+          unavailable_countries="${unavailable_countries} ${country}"
+        fi
+      done
+      find "$geo_directory" -maxdepth 1 $exclude_countries -type f -delete
     fi
 
-    curl_temp_file_path="/tmp/curl_geo_response.txt"
+    [ "$is_geo_reloading" == "1" ] && unavailable_countries="${GEOBLOCK_COUNTRIES}"
 
-    for country in $GEOBLOCK_COUNTRIES; do
-      geo_subnets_file="$geo_directory/$country.txt"
-      printf "Загрузка списка подсетей для страны ${BOLD_TEXT}${country}${NO_STYLE}... "
-      if curl -fsS "https://stat.ripe.net/data/country-resource-list/data.json?resource=${country}&v4_format=prefix" >"$curl_temp_file_path"; then
-        jq -r '.data.resources.ipv4[]' "$curl_temp_file_path" >"$geo_subnets_file"
-        exit_code=$?
-        if [ "$exit_code" -ne 0 ]; then
-          printf "${RED_COLOR}неудачно${NO_STYLE}\n"
+    if [ -n "$unavailable_countries" ]; then
+      curl_temp_file_path="/tmp/curl_geo_response.txt"
+
+      for country in $unavailable_countries; do
+        geo_subnets_file="$geo_directory/$country.txt"
+        [ -f "$geo_subnets_file" ] && rm "$geo_subnets_file"
+        printf "Загрузка списка подсетей для страны ${BOLD_TEXT}${country}${NO_STYLE}... "
+        log_message="Загрузка списка подсетей для страны ${country}"
+        if curl --max-time 30 -fsS "https://stat.ripe.net/data/country-resource-list/data.json?resource=${country}&v4_format=prefix" >"$curl_temp_file_path"; then
+          jq -r '.data.resources.ipv4[]' "$curl_temp_file_path" >"$geo_subnets_file"
+          exit_code=$?
+          if [ "$exit_code" -ne 0 ]; then
+            log_message="${log_message} завершилась неудачно"
+            load_result=1
+            load_country_failed=1
+            printf "${RED_COLOR}неудачно${NO_STYLE}\n"
+          else
+            log_message="${log_message} выполнена успешно"
+            load_result=0
+            printf "${GREEN_COLOR}успешно${NO_STYLE}\n"
+          fi
         else
-          printf "${GREEN_COLOR}успешно${NO_STYLE}\n"
+          log_message="${log_message} завершилась неудачно"
+          load_result=1
+          load_country_failed=1
+          printf "${RED_COLOR}неудачно${NO_STYLE}\n"
+        fi
+
+        if [ "$load_result" -eq 0 ]; then
+          print_message "notice" "${log_message}" 1
+        else
+          print_message "warning" "${log_message}" 0
+        fi
+      done
+      [ -f "$curl_temp_file_path" ] && rm "$curl_temp_file_path"
+    fi
+
+    [ "$load_country_failed" -eq 1 ] && create_geo_error_task || remove_geo_error_task
+
+    if [ "$is_trying_load_geo" == "1" ] && [ "$load_country_failed" -eq 1 ]; then
+      :
+    else
+      if [ -d "$geo_directory" ]; then
+        if [ "$is_geo_reloading" != "1" ] && [ "$is_trying_load_geo" != "1" ]; then
+          echo "create ascn_geo_$geo_ipset_type hash:net family inet hashsize 1024 maxelem 1000000" >"$temp_geo_ipset_path"
+        fi
+        for country in $GEOBLOCK_COUNTRIES; do
+          subnets_file="$geo_directory/$country.txt"
+          if [ -s "$subnets_file" ]; then
+            sed "s/^/add ascn_geo_$geo_ipset_type /" "$subnets_file" >>"$temp_geo_ipset_path"
+          fi
+        done
+      fi
+
+      geo_subnets_count="$(grep -c '^' "$temp_geo_ipset_path")"
+      if [ "$geo_subnets_count" -gt 1 ]; then
+        if [ "$is_geo_reloading" == "1" ] || [ "$is_trying_load_geo" == "1" ]; then
+          ipset flush ascn_geo_$geo_ipset_type
+        fi
+
+        if ! ipset -! restore <"$temp_geo_ipset_path"; then
+          print_message "error" "Не удалось импортировать список ascn_geo_$geo_ipset_type!"
         fi
       else
-        printf "${RED_COLOR}неудачно${NO_STYLE}\n"
+        print_message "error" "Загруженный список подсетей пуст"
       fi
-    done
-    rm "$curl_temp_file_path"
-  fi
-
-  if [ -d "$geo_directory" ]; then
-    if [ "$is_geo_reloading" != "1" ]; then
-      echo "create ascn_geo_$geo_ipset_type hash:net family inet hashsize 1024 maxelem 1000000" >"$temp_geo_ipset_path"
+      rm "$temp_geo_ipset_path"
     fi
-    for country in $GEOBLOCK_COUNTRIES; do
-      subnets_file="$geo_directory/$country.txt"
-      if [ -s "$subnets_file" ]; then
-        sed "s/^/add ascn_geo_$geo_ipset_type /" "$subnets_file" >>"$temp_geo_ipset_path"
+
+    remove_geo_lock_file
+  fi
+}
+
+create_geo_error_task() {
+  if [ ! -f "$ASCN_GEO_LOAD_ERROR_FILE" ]; then
+    echo "1" >"$ASCN_GEO_LOAD_ERROR_FILE"
+    ascn_cron_file="$ANTISCAN_DIR/ascn_crontab.conf"
+    if [ -s "$ascn_cron_file" ]; then
+      if ! grep -q 'S99ascn retry_load_geo' "$ascn_cron_file"; then
+        print_message "notice" "Создаем задачу для повторного обновления списка подсетей..."
+        sed -n -i '\:S99ascn:p; $a0 */1 * * * /opt/etc/init.d/S99ascn retry_load_geo &' "$ascn_cron_file"
+        update_cron
       fi
-    done
-  fi
-
-  geo_subnets_count="$(grep -c '^' "$temp_geo_ipset_path")"
-  if [ "$geo_subnets_count" -gt 1 ]; then
-    if ! ipset -! restore <"$temp_geo_ipset_path"; then
-      echo "Не удалось импортировать список ascn_geo_$geo_ipset_type!" >&2
+    else
+      print_message "error" "Не удалось создать задачу для повторного обновления списка подсетей"
     fi
   fi
-  rm "$temp_geo_ipset_path"
+}
+
+remove_geo_error_task() {
+  if [ -f "$ASCN_GEO_LOAD_ERROR_FILE" ]; then
+    rm "$ASCN_GEO_LOAD_ERROR_FILE"
+  fi
+  ascn_cron_file="$ANTISCAN_DIR/ascn_crontab.conf"
+  if [ -s "$ascn_cron_file" ]; then
+    if grep -q 'S99ascn retry_load_geo' "$ascn_cron_file"; then
+      print_message "notice" "Удаляем задачу повторного обновления списка подсетей..."
+      sed -i '/S99ascn retry_load_geo/d' "$ascn_cron_file"
+      update_cron
+    fi
+  fi
 }
 
 read_ip_candidates() {
   if ascn_is_running; then
     if config_is_reloading; then
-      echo "Работа с адресами-кандидатами невозможна, пока идёт обновление конфигурации Antiscan" >&2
+      print_message "error" "Работа с адресами-кандидатами невозможна, пока идёт обновление конфигурации Antiscan"
       exit 2
     else
       if [ -n "$(ipset -q list ascn_ips)" ] && [ -n "$(ipset -q list ascn_candidates)" ] && [ -n "$(ipset -q list ascn_subnets)" ]; then
@@ -507,11 +599,31 @@ config_is_reloading() {
   fi
 }
 
+geo_is_loading() {
+  if [ -f "$ASCN_GEO_LOCK_FILE" ]; then
+    return 0
+  else
+    return 1
+  fi
+}
+
+create_geo_lock_file() {
+  echo "1" >"$ASCN_GEO_LOCK_FILE"
+}
+
+remove_geo_lock_file() {
+  if geo_is_loading; then
+    rm "$ASCN_GEO_LOCK_FILE"
+  fi
+}
+
 get_status() {
   echo -n "Статус Antiscan:"
   if ascn_is_running; then
     if config_is_reloading; then
       printf "\t${YELLOW_COLOR}обновление конфигурации${NO_STYLE}\n"
+    elif geo_is_loading; then
+      printf "\t${YELLOW_COLOR}обновление списков подсетей геоблокировки${NO_STYLE}\n"
     else
       banned_ip_count="$(ipset list ascn_ips | tail -n +8 | grep -c '^')"
       banned_subnets_count="$(ipset list ascn_subnets | tail -n +8 | grep -c '^')"
@@ -550,16 +662,40 @@ get_status() {
       "blacklist" | "whitelist")
         geoset_name="ascn_geo_${GEOBLOCK_MODE}"
         [ "$GEOBLOCK_MODE" == "blacklist" ] && geoset_type="черный список" || geoset_type="белый список"
-        if [ -n "$(ipset -q -n list $geoset_name)" ]; then
-          printf "${GREEN_COLOR}$geoset_type${NO_STYLE}\nСтраны:\t\t\t${BOLD_TEXT}${GEOBLOCK_COUNTRIES}${NO_STYLE}\n"
+
+        geo_directory="$IPSETS_DIRECTORY/geo"
+        available_countries_list=""
+        if [ ! -d "$geo_directory" ]; then
+          countries_list="${RED_COLOR}${GEOBLOCK_COUNTRIES}${NO_STYLE}"
+        else
+          for country in $GEOBLOCK_COUNTRIES; do
+            subnets_file="$geo_directory/$country.txt"
+            if [ ! -s "$subnets_file" ]; then
+              [ -z "$countries_list" ] && countries_list="${RED_COLOR}${country}${NO_STYLE}" || countries_list="${countries_list} ${RED_COLOR}${country}${NO_STYLE}"
+            else
+              [ -z "$available_countries_list" ] && available_countries_list="${country}" || available_countries_list="${available_countries_list} ${country}"
+              [ -z "$countries_list" ] && countries_list="${BOLD_TEXT}${country}${NO_STYLE}" || countries_list="${countries_list} ${BOLD_TEXT}${country}${NO_STYLE}"
+            fi
+          done
+        fi
+
+        if [ -n "$(ipset -q -n list $geoset_name)" ] && [ -n "$available_countries_list" ]; then
+          printf "${GREEN_COLOR}$geoset_type${NO_STYLE}\n"
         else
           printf "${RED_COLOR}не работает${NO_STYLE}\n"
         fi
+        printf "Страны:\t\t\t${countries_list}\n"
         ;;
       *)
         printf "${RED_COLOR}отключена${NO_STYLE}\n"
         ;;
       esac
+      if [ "$SAVE_IPSETS" -eq 1 ] && [[ "$banned_ip_count" -gt 0 || "$banned_subnets_count" -gt 0 ]]; then
+        echo ""
+        if read -p "Сохранить списки накопленных заблокированных адресов? (Y/N): " confirm && [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]; then
+          export_ipsets && echo "Сохранение успешно выполнено"
+        fi
+      fi
     fi
   else
     printf "\t${RED_COLOR}не запущен${NO_STYLE}\n"
@@ -581,7 +717,7 @@ show_ipsets() {
   ips | subnets)
     if ascn_is_running; then
       if config_is_reloading; then
-        echo "Просмотр данных недоступен во время обновления конфигурации Antiscan" >&2
+        print_message "error" "Просмотр данных недоступен во время обновления конфигурации Antiscan"
       else
         text="IP"
         text_1="IP"
@@ -600,7 +736,7 @@ show_ipsets() {
         fi
       fi
     else
-      echo "Antiscan не запущен" >&2
+      print_message "error" "Antiscan не запущен"
     fi
     ;;
   *)
@@ -614,16 +750,21 @@ update_iptables() {
     exit 1
   else
     wait_timeout=15
+    log_message="Идет обновление конфигурации Antiscan, пробуем восстановить правила за 15 секунд... "
     while config_is_reloading && [ "$wait_timeout" -gt 0 ]; do
-      if [ $wait_timeout -eq 15 ]; then echo -n "Идет обновление конфигурации Antiscan, пробуем восстановить правила за 15 секунд... " >&2; fi
+      if [ $wait_timeout -eq 15 ]; then echo -n "$log_message" >&2; fi
       wait_timeout=$((wait_timeout - 1))
       sleep 1
     done
     if config_is_reloading; then
-      echo "неудачно" >&2
+      log_message="${log_message} неудачно"
+      print_message "warning" "${log_message}" 1
       exit 2
     else
-      if [ $wait_timeout -ne 15 ]; then echo "успешно" >&2; fi
+      if [ $wait_timeout -ne 15 ]; then
+        log_message="${log_message} успешно"
+        print_message "warning" "${log_message}" 1
+      fi
       add_rules
     fi
   fi
@@ -633,7 +774,7 @@ export_ipsets() {
   if [ "$SAVE_IPSETS" -eq 1 ]; then
     if ascn_is_running; then
       if config_is_reloading; then
-        echo "Экспорт ipset в файл недоступен во время обновления конфигурации Antiscan" >&2
+        print_message "error" "Экспорт ipset в файл недоступен во время обновления конфигурации Antiscan"
         return 2
       else
         for set_name in "ascn_candidates" "ascn_ips" "ascn_subnets"; do
@@ -641,11 +782,15 @@ export_ipsets() {
           banned_count="$(ipset list $set_name | tail -n +8 | grep -c '^')"
           if [ "$banned_count" -ne 0 ]; then
             if ! ipset save "$set_name" >"$ipset_filename"; then
-              echo "Не удалось экспортировать ipset $set_name!" >&2
+              print_message "error" "Не удалось экспортировать ipset $set_name!"
+              return 3
+            else
+              return 0
             fi
           else
             if [ -f "$ipset_filename" ]; then
               rm "$ipset_filename"
+              return 3
             fi
           fi
         done
@@ -671,12 +816,12 @@ update_ipset_timeout() {
     fi
 
     if [ "$new_timeout" -eq 0 ]; then
-      sed -i "s/ timeout [0-9]\+//" "$ipset_file" && echo "Для списка $set_name удалено время хранения записей"
+      sed -i "s/ timeout [0-9]\+//" "$ipset_file" && print_message "notice" "Для списка $set_name удалено время хранения записей"
     else
       if [ $old_timeout -eq 0 ]; then
-        sed -i "s/maxelem 65536\$/maxelem 65536 timeout $new_timeout/" "$ipset_file" && echo "Для списка $set_name установлено время хранения записей $new_timeout"
+        sed -i "s/maxelem 65536\$/maxelem 65536 timeout $new_timeout/" "$ipset_file" && print_message "notice" "Для списка $set_name установлено время хранения записей $new_timeout"
       else
-        sed -i "s/ timeout [0-9]\+/ timeout $new_timeout/" "$ipset_file" && echo "Для списка $set_name обновлено время хранения записей. Было $old_timeout, стало $new_timeout"
+        sed -i "s/ timeout [0-9]\+/ timeout $new_timeout/" "$ipset_file" && print_message "notice" "Для списка $set_name обновлено время хранения записей. Было $old_timeout, стало $new_timeout"
       fi
     fi
 
@@ -690,11 +835,14 @@ update_ipset_timeout() {
 
 reload_config() {
   if ! ascn_is_running; then
-    echo "Antiscan не запущен" >&2
+    print_message "error" "Antiscan не запущен"
     exit 1
   else
     if config_is_reloading; then
-      echo "Процесс обновления конфигурации Antiscan уже запущен" >&2
+      print_message "error" "Процесс обновления конфигурации Antiscan уже запущен"
+      exit 2
+    elif geo_is_loading; then
+      print_message "error" "Обновление конфигурации невозможно, пока идет загрузка списков подсетей геоблокировки"
       exit 2
     else
       create_lock_file
@@ -776,7 +924,9 @@ flush_ipsets() {
   "candidates" | "ips" | "subnets" | "custom_whitelist" | "custom_blacklist" | "custom_exclude" | "geo" | "")
     if ascn_is_running; then
       if config_is_reloading; then
-        echo "Очистка списков недоступна во время обновления конфигурации Antiscan" >&2
+        print_message "error" "Очистка списков недоступна во время обновления конфигурации Antiscan"
+      elif geo_is_loading; then
+        print_message "error" "Очистка списков недоступна во время загрузки подсетей геоблокировки"
       else
         ipset_to_clear="$1"
         question_text=""
@@ -800,7 +950,7 @@ flush_ipsets() {
             [ -n "$(ipset -q list $name)" ] && ipset flush $name
             case "$set" in
             "geo_whitelist" | "geo_blacklist")
-              rm -f "$IPSETS_DIRECTORY/geo/"*
+              rm -f "$IPSETS_DIRECTORY/geo/"* && geo_cleared="1"
               ;;
             "custom_whitelist" | "custom_blacklist" | "custom_exclude")
               local custom_set_filename="$ANTISCAN_DIR/$name.txt"
@@ -812,10 +962,15 @@ flush_ipsets() {
               ;;
             esac
           done
+          if [ "$geo_cleared" == "1" ]; then
+            msg_to_print="Перезапустите Antiscan, чтобы повторно включить геоблокировку."
+            printf "${YELLOW_COLOR}${msg_to_print}${NO_STYLE}\n"
+            print_message "warning" "${msg_to_print}"
+          fi
         fi
       fi
     else
-      echo "Antiscan не запущен" >&2
+      print_message "error" "Antiscan не запущен"
     fi
     ;;
   *)
@@ -829,7 +984,7 @@ update_ipsets() {
   "custom" | "geo")
     if ascn_is_running; then
       if config_is_reloading; then
-        echo "Обновление ipset недоступно во время обновления конфигурации Antiscan" >&2
+        print_message "error" "Обновление ipset недоступно во время обновления конфигурации Antiscan"
         exit 2
       else
         if [ "$1" == "custom" ]; then
@@ -839,8 +994,8 @@ update_ipsets() {
               ipset flush "$ipset_custom_name"
               load_custom_ipset "$ipset_custom_name"
             else
-              echo "ipset $ipset_custom_name отсутствует в ядре." >&2
-              echo "Перезапустите Antiscan и повторите попытку обновления." >&2
+              print_message "error" "ipset $ipset_custom_name отсутствует в ядре."
+              print_message "error" "Перезапустите Antiscan и повторите попытку обновления."
             fi
           fi
           if [ "$USE_CUSTOM_EXCLUDE_LIST" -eq 1 ]; then
@@ -848,8 +1003,8 @@ update_ipsets() {
               ipset flush ascn_custom_exclude
               load_custom_ipset "ascn_custom_exclude"
             else
-              echo "ipset ascn_custom_exclude отсутствует в ядре." >&2
-              echo "Перезапустите Antiscan и повторите попытку обновления." >&2
+              print_message "error" "ipset ascn_custom_exclude отсутствует в ядре."
+              print_message "error" "Перезапустите Antiscan и повторите попытку обновления."
             fi
           fi
         else
@@ -876,17 +1031,38 @@ update_cron() {
       tasks_from_crontab="$(crontab -l | grep 'S99ascn')"
       tasks_from_file="$(grep 'S99ascn' $ascn_cron_file)"
       if [ "$tasks_from_crontab" != "$tasks_from_file" ]; then
-        echo "Обновляем crontab"
+        print_message "notice" "Обновляем crontab"
         crontab -l | sed '/S99ascn/d' >"/tmp/crontasks"
         echo "$tasks_from_file" >>"/tmp/crontasks"
         crontab "/tmp/crontasks"
         rm "/tmp/crontasks"
       fi
     else
-      echo "Невозможно обновить crontab! Файл ascn_crontab.conf пуст." >&2
+      print_message "error" "Невозможно обновить crontab! Файл ascn_crontab.conf пуст."
     fi
   else
-    echo "crontab не найден! У вас не установлен cron?" >&2
+    print_message "error" "crontab не найден! У вас не установлен cron?"
+  fi
+}
+
+retry_load_geo() {
+  if ascn_is_running; then
+    if config_is_reloading; then
+      print_message "error" "Загрузка подсетей геоблокировки недоступна во время обновления конфигурации Antiscan"
+      exit 2
+    else
+      if [ "$GEOBLOCK_MODE" == "blacklist" ] || [ "$GEOBLOCK_MODE" == "whitelist" ]; then
+        if [ -f "$ASCN_GEO_LOAD_ERROR_FILE" ]; then
+          load_geo_ipset "$GEOBLOCK_MODE" 0 1
+        else
+          remove_geo_error_task
+        fi
+      else
+        remove_geo_error_task
+      fi
+    fi
+  else
+    exit 1
   fi
 }
 
@@ -931,6 +1107,9 @@ update_ipsets)
   ;;
 update_crontab)
   update_cron
+  ;;
+retry_load_geo)
+  retry_load_geo
   ;;
 *)
   echo "Использование: $0 {start|stop|restart|status|list|reload|flush|update_rules|read_candidates|save_ipsets|update_ipsets|update_crontab}"

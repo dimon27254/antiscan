@@ -9,19 +9,18 @@
 4) Геоблокировка в режиме черного/белого списка.
 
 > [!IMPORTANT]
-> Antiscan является IPv4-only. В настоящее время поддержка IPv6 не планируется к реализации.
+> Antiscan является IPv4-only. Поддержка IPv6 не планируется к реализации.
 
 ### Требования для корректной работы скрипта:
 1. Установленный компонент "Модули ядра для подсистемы Netfilter" (начиная с версии ПО 4.3 доступен без "Протокол IPv6").
 2. Предварительно настроенный и готовый к работе cron. Можно воспользоваться простой и понятной инструкцией: https://web.archive.org/web/20231004003915/https://forums.zyxmon.org/viewtopic.php?f=5&t=5257
-3. Установленный пакет wget-ssl в Entware для загрузки Antiscan в режиме "онлайн": `opkg update && opkg install wget-ssl"`
 
 ### Установка:
 1. **Офлайн вариант:**
 	- Скачать пакет и загрузить на устройство/внешний накопитель
-	- Выполнить команду `opkg install "/путь_к_пакету/antiscan_1.4_all.ipk"`
+	- Выполнить команду `opkg install "/путь_к_пакету/antiscan_1.5_all.ipk"`
 2. **Онлайн вариант:**
-	- Выполнить команду `opkg install https://github.com/dimon27254/antiscan/releases/download/1.4/antiscan_1.4_all.ipk"`
+	- Выполнить команду `opkg update && opkg install wget-ssl && opkg install https://github.com/dimon27254/antiscan/releases/download/1.5/antiscan_1.5_all.ipk"`
 3. Указать unix-имена интерфейсов интернет-подключений в файле `"/opt/etc/antiscan/ascn.conf"`. В ПО версии 4.3 и выше просмотр unix-имен интерфейсов доступен по команде `show interface {интерфейс} system-name`
 4. Настроить чтение и хранение списков адресов, если это требуется, в файле `"/opt/etc/antiscan/ascn.conf"`
 5. Запустить Antiscan командой `antiscan start`
