@@ -777,23 +777,22 @@ export_ipsets() {
         print_message "error" "Экспорт ipset в файл недоступен во время обновления конфигурации Antiscan"
         return 2
       else
+        save_error=0
         for set_name in "ascn_candidates" "ascn_ips" "ascn_subnets"; do
           ipset_filename="$IPSETS_DIRECTORY/ipset_$set_name.txt"
           banned_count="$(ipset list $set_name | tail -n +8 | grep -c '^')"
           if [ "$banned_count" -ne 0 ]; then
             if ! ipset save "$set_name" >"$ipset_filename"; then
               print_message "error" "Не удалось экспортировать ipset $set_name!"
-              return 3
-            else
-              return 0
+              save_error=1
             fi
           else
             if [ -f "$ipset_filename" ]; then
               rm "$ipset_filename"
-              return 3
             fi
           fi
         done
+        [ "$save_error" -eq 0 ] && return 0 || return 3
       fi
     else
       return 1
