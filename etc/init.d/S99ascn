@@ -690,12 +690,6 @@ get_status() {
         printf "${RED_COLOR}отключена${NO_STYLE}\n"
         ;;
       esac
-      if [ "$SAVE_IPSETS" -eq 1 ] && [[ "$banned_ip_count" -gt 0 || "$banned_subnets_count" -gt 0 ]]; then
-        echo ""
-        if read -p "Сохранить списки накопленных заблокированных адресов? (Y/N): " confirm && [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]; then
-          export_ipsets && echo "Сохранение успешно выполнено"
-        fi
-      fi
     fi
   else
     printf "\t${RED_COLOR}не запущен${NO_STYLE}\n"
@@ -777,14 +771,12 @@ export_ipsets() {
         print_message "error" "Экспорт ipset в файл недоступен во время обновления конфигурации Antiscan"
         return 2
       else
-        save_error=0
         for set_name in "ascn_candidates" "ascn_ips" "ascn_subnets"; do
           ipset_filename="$IPSETS_DIRECTORY/ipset_$set_name.txt"
           banned_count="$(ipset list $set_name | tail -n +8 | grep -c '^')"
           if [ "$banned_count" -ne 0 ]; then
             if ! ipset save "$set_name" >"$ipset_filename"; then
               print_message "error" "Не удалось экспортировать ipset $set_name!"
-              save_error=1
             fi
           else
             if [ -f "$ipset_filename" ]; then
@@ -792,7 +784,6 @@ export_ipsets() {
             fi
           fi
         done
-        [ "$save_error" -eq 0 ] && return 0 || return 3
       fi
     else
       return 1
