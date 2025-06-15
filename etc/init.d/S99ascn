@@ -952,7 +952,7 @@ flush_ipsets() {
               ;;
             esac
           done
-          if [ "$geo_cleared" == "1" ]; then
+          if [ "$geo_cleared" == "1" ] && [[ "$GEOBLOCK_MODE" == "blacklist" || "$GEOBLOCK_MODE" == "whitelist" ]]; then
             msg_to_print="Перезапустите Antiscan, чтобы повторно включить геоблокировку."
             printf "${YELLOW_COLOR}${msg_to_print}${NO_STYLE}\n"
             print_message "warning" "${msg_to_print}"

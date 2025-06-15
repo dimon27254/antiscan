@@ -18,9 +18,9 @@
 ### Установка:
 1. **Офлайн вариант:**
 	- Скачать пакет и загрузить на устройство/внешний накопитель
-	- Выполнить команду `opkg install "/путь_к_пакету/antiscan_1.5.2_all.ipk"`
+	- Выполнить команду `opkg install "/путь_к_пакету/antiscan_1.5.3_all.ipk"`
 2. **Онлайн вариант:**
-	- Выполнить команду `opkg update && opkg install wget-ssl ca-bundle && opkg install https://github.com/dimon27254/antiscan/releases/download/1.5.2/antiscan_1.5.2_all.ipk`
+	- Выполнить команду `opkg update && opkg install wget-ssl ca-bundle && opkg install https://github.com/dimon27254/antiscan/releases/download/1.5.3/antiscan_1.5.3_all.ipk`
 3. Указать unix-имена интерфейсов интернет-подключений в файле `"/opt/etc/antiscan/ascn.conf"`. В ПО версии 4.3 и выше просмотр unix-имен интерфейсов доступен по команде `show interface {интерфейс} system-name`
 4. Настроить чтение и хранение списков адресов, если это требуется, в файле `"/opt/etc/antiscan/ascn.conf"`
 5. Запустить Antiscan командой `antiscan start`
