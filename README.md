@@ -9,7 +9,7 @@
 4) Геоблокировка в режиме черного/белого списка.
 
 > [!IMPORTANT]
-> Antiscan является IPv4-only. Поддержка IPv6 не планируется к реализации.
+> Antiscan является IPv4-only, работает только для протокола TCP.
 
 ### Требования для корректной работы скрипта:
 1. Установленный компонент "Модули ядра для подсистемы Netfilter" (начиная с версии ПО 4.3 доступен без "Протокол IPv6").
@@ -18,9 +18,9 @@
 ### Установка:
 1. **Офлайн вариант:**
 	- Скачать пакет и загрузить на устройство/внешний накопитель
-	- Выполнить команду `opkg install "/путь_к_пакету/antiscan_1.5.3_all.ipk"`
+	- Выполнить команду `opkg install "/путь_к_пакету/antiscan_1.6_all.ipk"`
 2. **Онлайн вариант:**
-	- Выполнить команду `opkg update && opkg install wget-ssl ca-bundle && opkg install https://github.com/dimon27254/antiscan/releases/download/1.5.3/antiscan_1.5.3_all.ipk`
+	- Выполнить команду `opkg update && opkg install wget-ssl ca-bundle && opkg install https://github.com/dimon27254/antiscan/releases/download/1.6/antiscan_1.6_all.ipk`
 3. Указать unix-имена интерфейсов интернет-подключений в файле `"/opt/etc/antiscan/ascn.conf"`. В ПО версии 4.3 и выше просмотр unix-имен интерфейсов доступен по команде `show interface {интерфейс} system-name`
 4. Настроить чтение и хранение списков адресов, если это требуется, в файле `"/opt/etc/antiscan/ascn.conf"`
 5. Запустить Antiscan командой `antiscan start`
@@ -79,11 +79,21 @@ GEOBLOCK_MODE=0
 
 # Перечень стран для геоблокировки. Пример: одна страна - "US", множество стран - "RU DE"
 GEOBLOCK_COUNTRIES=""
+
+# Чтение системных списков блокировки по ip lockout-policy. 0 - выключено, 1 - включено
+READ_NDM_LOCKOUT_IPSETS=0
+
+# Срок хранения записей, считанных из системных списков:
+LOCKOUT_IPSET_BANTIME=864000
 ```
 > [!TIP]
 > Период чтения списка кандидатов по умолчанию равен 1 минуте.
 > 
 > Текст задачи в **ascn_crontab.conf**: `*/1 * * * * /opt/etc/init.d/S99ascn read_candidates &`
+>
+> Период чтения системных списков блокировки по умолчанию равен 2 минутам.
+> 
+> Текст задачи в **ascn_crontab.conf**: `*/2 * * * * /opt/etc/init.d/S99ascn read_ndm_ipsets &`
 >
 > Списки адресов по умолчанию сохраняются каждые 5 дней в 00:00.
 >
@@ -93,21 +103,22 @@ GEOBLOCK_COUNTRIES=""
 >
 > Текст задачи в **ascn_crontab.conf**: `0 5 */15 * * /opt/etc/init.d/S99ascn update_ipsets geo &`
 
-### Использование S99ascn:
+### Использование antiscan:
 ```
-{start|stop|restart|status|list|reload|flush|update_rules|read_candidates|save_ipsets|update_ipsets|update_crontab}
+{start|stop|restart|status|list|reload|flush|update_rules|read_candidates|read_ndm_ipsets|save_ipsets|update_ipsets|update_crontab}
 start                            начать работу скрипта (создать правила, ipset'ы, начать сбор IP)
 stop                             остановить работу скрипта (удалить правила, очистить ipset'ы, отменить блокировку)
 restart                          остановить и заново начать работу скрипта
 status                           отобразить статус Antiscan и количество заблокированных IP, подсетей
-list {ips|subnets}               отобразить список и количество заблокированных IP/подсетей
+list {ips|subnets|ndm_lockout}   отобразить список и количество заблокированных IP/подсетей
 reload                           обновить конфигурацию Antiscan (перечитать файл ascn.conf)
 
-flush [candidates|ips|subnets|custom_whitelist|custom_blacklist|custom_exclude|geo]
+flush [candidates|ips|subnets|custom_whitelist|custom_blacklist|custom_exclude|geo|ndm_lockout]
                                  очистить списки адресов и удалить их файлы
 
 update_rules                     проверить наличие правил iptables, и добавить их при отсутствии (для hook-скрипта netfilter.d)
 read_candidates                  обработать список адресов кандидатов для блокировки по подсетям (запускается вручную или по расписанию)
+read_ndm_ipsets                  считать системные списки блокировки по ip lockout-policy (запускается вручную или по расписанию)
 save_ipsets                      сохранить списки накопленных адресов в файлы (запускается вручную или по расписанию)
 update_ipsets {custom|geo}       обновить пользовательские списки адресов или подсети для геоблокировки (запускается вручную или по расписанию)
 update_crontab                   обновить задачи Antiscan в файле crontab

@@ -29,6 +29,8 @@ check_config() {
   [ -z "$CUSTOM_LISTS_BLOCK_MODE" ] && CUSTOM_LISTS_BLOCK_MODE=0
   [ -z "$USE_CUSTOM_EXCLUDE_LIST" ] && USE_CUSTOM_EXCLUDE_LIST=0
   [ -z "$GEOBLOCK_MODE" ] && GEOBLOCK_MODE=0
+  [ -z "$READ_NDM_LOCKOUT_IPSETS" ] && READ_NDM_LOCKOUT_IPSETS=0
+  [ -z "$LOCKOUT_IPSET_BANTIME" ] && LOCKOUT_IPSET_BANTIME=0
 
   if [ -z "$IPSETS_DIRECTORY" ] && [[ "$SAVE_IPSETS" == "1" || "$GEOBLOCK_MODE" != "0" ]]; then
     print_message "error" "В ascn.conf не указан путь для сохранения ipset!"
@@ -158,6 +160,8 @@ write_temp_config() {
   echo "CUSTOM_LISTS_BLOCK_MODE=\"$CUSTOM_LISTS_BLOCK_MODE\"" >>"$CONFIG_FILE_TEMP"
   echo "GEOBLOCK_MODE=\"$GEOBLOCK_MODE\"" >>"$CONFIG_FILE_TEMP"
   echo "GEOBLOCK_COUNTRIES=\"$GEOBLOCK_COUNTRIES\"" >>"$CONFIG_FILE_TEMP"
+  echo "READ_NDM_LOCKOUT_IPSETS=$READ_NDM_LOCKOUT_IPSETS" >>"$CONFIG_FILE_TEMP"
+  echo "LOCKOUT_IPSET_BANTIME=$LOCKOUT_IPSET_BANTIME" >>"$CONFIG_FILE_TEMP"
 }
 
 destroy_temp_config() {
@@ -168,6 +172,8 @@ destroy_temp_config() {
   USE_CUSTOM_EXCLUDE_LIST=0
   GEOBLOCK_MODE=0
   GEOBLOCK_COUNTRIES=""
+  READ_NDM_LOCKOUT_IPSETS=0
+  LOCKOUT_IPSET_BANTIME=0
   rm -f "$CONFIG_FILE_TEMP"
   source "$CONFIG_FILE"
 }
@@ -214,6 +220,9 @@ add_rules() {
     if [ -n "$(ipset -q list ascn_geo_whitelist)" ]; then
       _iptables -A ANTISCAN -w -t filter -p tcp -m multiport --dports $PORTS -m set ! --match-set ascn_geo_whitelist src -j DROP
     fi
+    if [ -n "$(ipset -q list ascn_ndm_lockout)" ]; then
+      _iptables -A ANTISCAN -w -t filter -p tcp -m multiport --dports $PORTS -m set --match-set ascn_ndm_lockout src -j DROP
+    fi
     _iptables -A ANTISCAN -w -t filter -p tcp -m multiport --dports $PORTS -m set --match-set ascn_subnets src -j DROP
     _iptables -A ANTISCAN -w -t filter -p tcp -m multiport --dports $PORTS -j SET --add-set ascn_candidates src
     _iptables -A ANTISCAN -w -t filter -p tcp -m multiport --dports $PORTS -m set --match-set ascn_ips src -j DROP
@@ -257,6 +266,10 @@ create_ipsets() {
     add_ipset "ascn_subnets" "hash:net" $SUBNETS_BANTIME
   fi
 
+  if [ "$READ_NDM_LOCKOUT_IPSETS" -eq 1 ] && [ -z "$(ipset -q list ascn_ndm_lockout)" ]; then
+    add_ipset "ascn_ndm_lockout" "hash:ip" $LOCKOUT_IPSET_BANTIME
+  fi
+
   if [ "$CUSTOM_LISTS_BLOCK_MODE" == "blacklist" ] || [ "$CUSTOM_LISTS_BLOCK_MODE" == "whitelist" ]; then
     ipset_custom_name="ascn_custom_${CUSTOM_LISTS_BLOCK_MODE}"
     if [ -z "$(ipset -q list $ipset_custom_name)" ]; then
@@ -294,6 +307,9 @@ add_ipset() {
   "ascn_subnets")
     ipset_timeout_string=$([ "$SUBNETS_BANTIME" -ne 0 ] && echo "timeout "$SUBNETS_BANTIME"")
     ;;
+  "ascn_ndm_lockout")
+    ipset_timeout_string=$([ "$LOCKOUT_IPSET_BANTIME" -ne 0 ] && echo "timeout "$LOCKOUT_IPSET_BANTIME"")
+    ;;
   esac
 
   if [ "$SAVE_IPSETS" -eq 1 ] && [ -s "$ipset_file" ]; then
@@ -313,37 +329,12 @@ add_ipset() {
 }
 
 destroy_ipsets() {
-  if [ -n "$(ipset -q list ascn_candidates)" ]; then
-    ipset destroy ascn_candidates
-  fi
-
-  if [ -n "$(ipset -q list ascn_ips)" ]; then
-    ipset destroy ascn_ips
-  fi
-
-  if [ -n "$(ipset -q list ascn_subnets)" ]; then
-    ipset destroy ascn_subnets
-  fi
-
-  if [ -n "$(ipset -q list ascn_custom_exclude)" ]; then
-    ipset destroy ascn_custom_exclude
-  fi
-
-  if [ -n "$(ipset -q list ascn_custom_blacklist)" ]; then
-    ipset destroy ascn_custom_blacklist
-  fi
-
-  if [ -n "$(ipset -q list ascn_custom_whitelist)" ]; then
-    ipset destroy ascn_custom_whitelist
-  fi
-
-  if [ -n "$(ipset -q list ascn_geo_blacklist)" ]; then
-    ipset destroy ascn_geo_blacklist
-  fi
-
-  if [ -n "$(ipset -q list ascn_geo_whitelist)" ]; then
-    ipset destroy ascn_geo_whitelist
-  fi
+  local ipsets_list="ascn_candidates ascn_ips ascn_subnets ascn_custom_exclude ascn_custom_blacklist ascn_custom_whitelist ascn_geo_blacklist ascn_geo_whitelist ascn_ndm_lockout"
+  for set in $ipsets_list; do
+    if [ -n "$(ipset -q list $set)" ]; then
+      ipset destroy $set
+    fi
+  done
 }
 
 restore_ipset_from_file() {
@@ -563,6 +554,30 @@ EOF
   fi
 }
 
+read_ndm_ipsets() {
+  if ascn_is_running; then
+    if config_is_reloading; then
+      print_message "error" "Работа с системными списками адресов невозможна, пока идёт обновление конфигурации Antiscan"
+      exit 2
+    else
+      if [ -n "$(ipset -q list ascn_ndm_lockout)" ]; then
+        ndm_sets="$(ipset list -n | grep -E '^_NDM_BFD_.+4$')"
+        for ndm_set in $ndm_sets; do
+          ndm_set_data="$(ipset save $ndm_set -q | tail -n +2 | sed "s/$ndm_set/ascn_ndm_lockout/")"
+          if [ -n "$ndm_set_data" ]; then
+            [ -z "$ndm_set_ips" ] && ndm_set_ips="${ndm_set_data}" || ndm_set_ips="${ndm_set_ips}\n${ndm_set_data}"
+          fi
+        done
+        if [ -n "$ndm_set_ips" ]; then
+          echo -e "$ndm_set_ips" | ipset -! restore
+        fi
+      fi
+    fi
+  else
+    exit 1
+  fi
+}
+
 create_status_file() {
   echo "1" >"$ASCN_TEMP_FILE"
 }
@@ -630,6 +645,13 @@ get_status() {
       printf "\t${GREEN_COLOR}работает${NO_STYLE}\n"
       printf "Заблокировано IP:\t${BOLD_TEXT}$banned_ip_count${NO_STYLE}\n"
       printf "Заблокировано подсетей:\t${BOLD_TEXT}$banned_subnets_count${NO_STYLE}\n"
+
+      if [ "$READ_NDM_LOCKOUT_IPSETS" -eq 1 ]; then
+        banned_ip_ndm_count="$(ipset list ascn_ndm_lockout | tail -n +8 | grep -c '^')"
+        printf "Заблокировано NDMS:\t${BOLD_TEXT}$banned_ip_ndm_count${NO_STYLE}\n"
+      else
+        printf "Чтение списков NDMS:\t${RED_COLOR}отключено${NO_STYLE}\n"
+      fi
 
       if [ "$USE_CUSTOM_EXCLUDE_LIST" -eq 1 ] || [ "$CUSTOM_LISTS_BLOCK_MODE" == "blacklist" ] || [ "$CUSTOM_LISTS_BLOCK_MODE" == "whitelist" ]; then
         if [ "$USE_CUSTOM_EXCLUDE_LIST" -eq 1 ]; then
@@ -708,7 +730,7 @@ get_ipset_member_text() {
 
 show_ipsets() {
   case "$1" in
-  ips | subnets)
+  ips | subnets | ndm_lockout)
     if ascn_is_running; then
       if config_is_reloading; then
         print_message "error" "Просмотр данных недоступен во время обновления конфигурации Antiscan"
@@ -720,7 +742,7 @@ show_ipsets() {
           text_1="подсетей"
         fi
         ipset_data="$(ipset list ascn_$1 -s | tail -n +8)"
-        banned_count="$(echo "$ipset_data" | grep -c '^')"
+        [ -z "$ipset_data" ] && banned_count=0 || banned_count="$(echo "$ipset_data" | grep -c '^')"
         if [ "$banned_count" -eq 0 ]; then
           echo "Заблокированные ${text} отсутствуют"
         else
@@ -734,7 +756,7 @@ show_ipsets() {
     fi
     ;;
   *)
-    echo "Использование: $0 list {ips|subnets}"
+    echo "Использование: $0 list {ips|subnets|ndm_lockout}"
     ;;
   esac
 }
@@ -771,7 +793,8 @@ export_ipsets() {
         print_message "error" "Экспорт ipset в файл недоступен во время обновления конфигурации Antiscan"
         return 2
       else
-        for set_name in "ascn_candidates" "ascn_ips" "ascn_subnets"; do
+        local ipsets_list="ascn_candidates ascn_ips ascn_subnets ascn_ndm_lockout"
+        for set_name in $ipsets_list; do
           ipset_filename="$IPSETS_DIRECTORY/ipset_$set_name.txt"
           banned_count="$(ipset list $set_name | tail -n +8 | grep -c '^')"
           if [ "$banned_count" -ne 0 ]; then
@@ -844,6 +867,8 @@ reload_config() {
       use_custom_exclude_list_old=$USE_CUSTOM_EXCLUDE_LIST
       geoblock_mode_old="$GEOBLOCK_MODE"
       geo_countries_old="$GEOBLOCK_COUNTRIES"
+      read_ndm_lockout_old="$READ_NDM_LOCKOUT_IPSETS"
+      ndm_lockout_timeout_old="$LOCKOUT_IPSET_BANTIME"
 
       remove_rules
       destroy_temp_config
@@ -856,6 +881,7 @@ reload_config() {
       update_ipset_timeout "ascn_ips" "$ascn_old_timeout" "$RECENT_CONNECTIONS_BANTIME" "" 1
       update_ipset_timeout "ascn_subnets" "$ascn_subnets_old_timeout" "$SUBNETS_BANTIME" "" 1
 
+      reload_lockout_ipset "$read_ndm_lockout_old" "$READ_NDM_LOCKOUT_IPSETS" "$ndm_lockout_timeout_old" "$LOCKOUT_IPSET_BANTIME"
       reload_custom_ipset "$custom_lists_block_mode_old" "$CUSTOM_LISTS_BLOCK_MODE"
       reload_custom_exclude_ipset "$use_custom_exclude_list_old" "$USE_CUSTOM_EXCLUDE_LIST"
       reload_geo_ipset "$geoblock_mode_old" "$GEOBLOCK_MODE" "$geo_countries_old" "$GEOBLOCK_COUNTRIES"
@@ -909,9 +935,24 @@ reload_geo_ipset() {
   fi
 }
 
+reload_lockout_ipset() {
+  old_lockout_state="$1"
+  new_lockout_state="$2"
+  old_lockout_timeout="$3"
+  new_lockout_timeout="$4"
+  if [ "$old_lockout_state" != "$new_lockout_state" ] || [ "$old_lockout_timeout" != "$new_lockout_timeout" ]; then
+    if [ "$old_lockout_state" != "0" ]; then
+      [ -n "$(ipset -q list ascn_ndm_lockout)" ] && ipset destroy ascn_ndm_lockout
+    fi
+    if [ "$new_lockout_state" != "0" ]; then
+      add_ipset "ascn_ndm_lockout" "hash:ip" $LOCKOUT_IPSET_BANTIME
+    fi
+  fi
+}
+
 flush_ipsets() {
   case "$1" in
-  "candidates" | "ips" | "subnets" | "custom_whitelist" | "custom_blacklist" | "custom_exclude" | "geo" | "")
+  "candidates" | "ips" | "subnets" | "custom_whitelist" | "custom_blacklist" | "custom_exclude" | "geo" | "ndm_lockout" | "")
     if ascn_is_running; then
       if config_is_reloading; then
         print_message "error" "Очистка списков недоступна во время обновления конфигурации Antiscan"
@@ -921,7 +962,7 @@ flush_ipsets() {
         ipset_to_clear="$1"
         question_text=""
         if [ -z "$ipset_to_clear" ]; then
-          ipset_to_clear="candidates ips subnets custom_whitelist custom_blacklist custom_exclude geo_whitelist geo_blacklist"
+          ipset_to_clear="candidates ips subnets custom_whitelist custom_blacklist custom_exclude geo_whitelist geo_blacklist ndm_lockout"
           question_text="Очистить все списки адресов? (Y/N): "
         else
           ipset_readable_name=""
@@ -932,6 +973,7 @@ flush_ipsets() {
           [ "$ipset_to_clear" == "custom_blacklist" ] && ipset_readable_name="пользовательский черный список адресов"
           [ "$ipset_to_clear" == "custom_exclude" ] && ipset_readable_name="пользовательский список адресов-исключений"
           [ "$ipset_to_clear" == "geo" ] && ipset_to_clear="geo_whitelist geo_blacklist" && ipset_readable_name="список подсетей геоблокировки"
+          [ "$ipset_to_clear" == "ndm_lockout" ] && ipset_readable_name="список заблокированных адресов NDMS"
           question_text="Очистить ${ipset_readable_name}? (Y/N): "
         fi
         if read -p "$question_text" confirm && [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]; then
@@ -949,6 +991,7 @@ flush_ipsets() {
             *)
               set_filename="$IPSETS_DIRECTORY/ipset_$name.txt"
               [ -f "$set_filename" ] && rm "$set_filename"
+              [ "$set" == "ndm_lockout" ] && lockout_cleared="1"
               ;;
             esac
           done
@@ -957,6 +1000,18 @@ flush_ipsets() {
             printf "${YELLOW_COLOR}${msg_to_print}${NO_STYLE}\n"
             print_message "warning" "${msg_to_print}"
           fi
+          if [ "$lockout_cleared" == "1" ] && [ "$READ_NDM_LOCKOUT_IPSETS" == "1" ]; then
+            local ndm_ipsets="$(ipset list -n | grep -E '^_NDM_BFD_.+4$')"
+            for ndm_ipset in $ndm_ipsets; do
+              ndm_ipset_data="$(ipset list $ndm_ipset | tail -n +8)"
+              [ -n "$ndm_ipset_data" ] && ndmset_has_ips=1
+            done
+            if [ "$ndmset_has_ips" == "1" ]; then
+              msg_to_print="Блокировка будет снята, когда система очистит собственные списки ограничения доступа."
+              printf "${YELLOW_COLOR}${msg_to_print}${NO_STYLE}\n"
+              print_message "warning" "${msg_to_print}"
+            fi
+          fi
         fi
       fi
     else
@@ -964,7 +1019,7 @@ flush_ipsets() {
     fi
     ;;
   *)
-    echo "Использование: $0 flush [candidates|ips|subnets|custom_whitelist|custom_blacklist|custom_exclude|geo]"
+    echo "Использование: $0 flush [candidates|ips|subnets|custom_whitelist|custom_blacklist|custom_exclude|geo|ndm_lockout]"
     ;;
   esac
 }
@@ -1089,6 +1144,9 @@ update_rules)
 read_candidates | read)
   read_ip_candidates
   ;;
+read_ndm_ipsets | read_ndm)
+  read_ndm_ipsets
+  ;;
 save_ipsets | save)
   export_ipsets
   ;;
@@ -1102,6 +1160,6 @@ retry_load_geo)
   retry_load_geo
   ;;
 *)
-  echo "Использование: $0 {start|stop|restart|status|list|reload|flush|update_rules|read_candidates|save_ipsets|update_ipsets|update_crontab}"
+  echo "Использование: $0 {start|stop|restart|status|list|reload|flush|update_rules|read_candidates|read_ndm_ipsets|save_ipsets|update_ipsets|update_crontab}"
   ;;
 esac

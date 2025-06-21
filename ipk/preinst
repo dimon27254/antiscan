@@ -2,6 +2,7 @@
 ANTISCAN_DIR="/opt/etc/antiscan"
 OLD_CONFIG_FILE="/opt/etc/ascn.conf"
 CONFIG_FILE="$ANTISCAN_DIR/ascn.conf"
+CRONTAB_FILE="$ANTISCAN_DIR/ascn_crontab.conf"
 BOLD_TEXT="\033[1m"
 NO_STYLE="\033[0m"
 if [ -s "$OLD_CONFIG_FILE" ]; then
@@ -20,6 +21,8 @@ if [ -s "$CONFIG_FILE" ]; then
     custom_lists_block_mode_str="$(grep "CUSTOM_LISTS_BLOCK_MODE" "$CONFIG_FILE")"
     geoblock_mode_str="$(grep "GEOBLOCK_MODE" "$CONFIG_FILE")"
     geoblock_countries_str="$(grep "GEOBLOCK_COUNTRIES" "$CONFIG_FILE")"
+    read_ndm_str="$(grep "READ_NDM_LOCKOUT_IPSETS" "$CONFIG_FILE")"
+    ndm_lockout_time_str="$(grep "LOCKOUT_IPSET_BANTIME" "$CONFIG_FILE")"
     if [ -z "$rules_mask_str" ]; then
         sed -i '/^RECENT_CONNECTIONS_TIME=/iRULES_MASK=\"255.255.255.255\"' "$CONFIG_FILE"
         printf "В имеющийся ascn.conf добавлена новая строка ${BOLD_TEXT}RULES_MASK=\"255.255.255.255\"${NO_STYLE}\n"
@@ -33,7 +36,7 @@ if [ -s "$CONFIG_FILE" ]; then
         printf "В имеющийся ascn.conf добавлена новая строка ${BOLD_TEXT}IPSETS_DIRECTORY=\"\"${NO_STYLE}\n"
     fi
     if [ -z "$save_ipsets_str" ]; then
-        printf "SAVE_IPSETS=0\n" >>"$CONFIG_FILE"
+        printf "\nSAVE_IPSETS=0\n" >>"$CONFIG_FILE"
         printf "В имеющийся ascn.conf добавлена новая строка ${BOLD_TEXT}SAVE_IPSETS=0${NO_STYLE}\n"
     fi
     if [ -z "$use_custom_exclude_str" ]; then
@@ -51,5 +54,21 @@ if [ -s "$CONFIG_FILE" ]; then
     if [ -z "$geoblock_countries_str" ]; then
         printf "GEOBLOCK_COUNTRIES=\"\"\n" >>"$CONFIG_FILE"
         printf "В имеющийся ascn.conf добавлена новая строка ${BOLD_TEXT}GEOBLOCK_COUNTRIES=\"\"${NO_STYLE}\n"
+    fi
+    if [ -z "$read_ndm_str" ]; then
+        printf "\nREAD_NDM_LOCKOUT_IPSETS=0\n" >>"$CONFIG_FILE"
+        printf "В имеющийся ascn.conf добавлена новая строка ${BOLD_TEXT}READ_NDM_LOCKOUT_IPSETS=0${NO_STYLE}\n"
+    fi
+    if [ -z "$ndm_lockout_time_str" ]; then
+        printf "LOCKOUT_IPSET_BANTIME=864000\n" >>"$CONFIG_FILE"
+        printf "В имеющийся ascn.conf добавлена новая строка ${BOLD_TEXT}LOCKOUT_IPSET_BANTIME=864000${NO_STYLE}\n"
+    fi
+fi
+if [ -s "$CRONTAB_FILE" ]; then
+    read_ndm_task_str="$(grep 'read_ndm_ipsets' "$CRONTAB_FILE")"
+    if [ -z "$read_ndm_task_str" ]; then
+        printf "\n*/2 * * * * /opt/etc/init.d/S99ascn read_ndm_ipsets &\n" >>"$CRONTAB_FILE"
+        sed -n -i '\:S99ascn:p' "$CRONTAB_FILE"
+        printf "В имеющийся ascn_crontab.conf добавлена задача для чтения списков NDM ip lockout-policy\n"
     fi
 fi
