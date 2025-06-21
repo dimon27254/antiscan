@@ -563,7 +563,7 @@ read_ndm_ipsets() {
       if [ -n "$(ipset -q list ascn_ndm_lockout)" ]; then
         ndm_sets="$(ipset list -n | grep -E '^_NDM_BFD_.+4$')"
         for ndm_set in $ndm_sets; do
-          ndm_set_data="$(ipset save $ndm_set -q | tail -n +2 | sed "s/$ndm_set/ascn_ndm_lockout/")"
+          ndm_set_data="$(ipset save $ndm_set -q | tail -n +2 | sed "/127.0.0.1$/d; s/$ndm_set/ascn_ndm_lockout/")"
           if [ -n "$ndm_set_data" ]; then
             [ -z "$ndm_set_ips" ] && ndm_set_ips="${ndm_set_data}" || ndm_set_ips="${ndm_set_ips}\n${ndm_set_data}"
           fi
