@@ -18,14 +18,14 @@
 ### Установка:
 1. **Офлайн вариант:**
 	- Скачать пакет и загрузить на устройство/внешний накопитель
-	- Выполнить команду `opkg install "/путь_к_пакету/antiscan_1.6.1_all.ipk"`
+	- Выполнить команду `opkg install "/путь_к_пакету/antiscan_1.7_all.ipk"`
 2. **Онлайн вариант:**
-	- Выполнить команду `opkg update && opkg install wget-ssl ca-bundle && opkg install https://github.com/dimon27254/antiscan/releases/download/1.6.1/antiscan_1.6.1_all.ipk`
+	- Выполнить команду `opkg update && opkg install wget-ssl ca-bundle && opkg install https://github.com/dimon27254/antiscan/releases/download/1.7/antiscan_1.7_all.ipk`
 3. Указать unix-имена интерфейсов интернет-подключений в файле `"/opt/etc/antiscan/ascn.conf"`. В ПО версии 4.3 и выше просмотр unix-имен интерфейсов доступен по команде `show interface {интерфейс} system-name`
 4. Настроить чтение и хранение списков адресов, если это требуется, в файле `"/opt/etc/antiscan/ascn.conf"`
 5. Запустить Antiscan командой `antiscan start`
 
-**(NEW) Начиная с версии 1.4 настройка Antiscan (редактирование конфигурационного файла, списка cron-задач, пользовательских списков адресов) возможна с использованием [web4static](https://github.com/spatiumstas/web4static) от [spatiumstas](https://github.com/spatiumstas).**
+**Начиная с версии 1.4 настройка Antiscan (редактирование конфигурационного файла, списка cron-задач, пользовательских списков адресов) возможна с использованием [web4static](https://github.com/spatiumstas/web4static) от [spatiumstas](https://github.com/spatiumstas).**
 
 ### Описание параметров в ascn.conf:
 ```
@@ -33,8 +33,12 @@
 # Перечень интерфейсов, на которых работает Antiscan. Множество интерфейсов указывается через пробел, пример: "eth3 eth2.2 ppp0":
 ISP_INTERFACES="eth3" 
 
-# Перечень портов, на которых работает Antiscan. Множество портов указывается через запятую, пример: "22,80,443":
+# Перечень портов служб устройства, на которых работает Antiscan. Множество портов указывается через запятую, пример: "22,80,443":
 PORTS="22,80,443"
+
+# Перечень портов хостов в локальной сети, на которые идет перенаправление трафика. Пример ввода множества портов: "22,80,443".
+# ОБРАТИТЕ ВНИМАНИЕ! Указываются порты из поля "направлять на порт" в правилах переадресации, а не "открыть порт".
+PORTS_FORWARDED="22,80,443"
 
 # Настройки ограничения множественных соединений:
 # ДЛЯ ОПЫТНЫХ ПОЛЬЗОВАТЕЛЕЙ! Маска правил iptables для отслеживания соединений:
@@ -105,7 +109,7 @@ LOCKOUT_IPSET_BANTIME=864000
 
 ### Использование Antiscan:
 ```
-{start|stop|restart|status|list|reload|flush|update_rules|read_candidates|read_ndm_ipsets|save_ipsets|update_ipsets|update_crontab}
+{start|stop|restart|status|list|reload|flush|version|update_rules|read_candidates|read_ndm_ipsets|save_ipsets|update_ipsets|update_crontab}
 start                            начать работу скрипта (создать правила, ipset'ы, начать сбор IP)
 stop                             остановить работу скрипта (удалить правила, очистить ipset'ы, отменить блокировку)
 restart                          остановить и заново начать работу скрипта
@@ -116,6 +120,7 @@ reload                           обновить конфигурацию Antis
 flush [candidates|ips|subnets|custom_whitelist|custom_blacklist|custom_exclude|geo|ndm_lockout]
                                  очистить списки адресов и удалить их файлы
 
+version                          отобразить версию установленного Antiscan
 update_rules                     проверить наличие правил iptables, и добавить их при отсутствии (для hook-скрипта netfilter.d)
 read_candidates                  обработать список адресов кандидатов для блокировки по подсетям (запускается вручную или по расписанию)
 read_ndm_ipsets                  считать системные списки блокировки по ip lockout-policy (запускается вручную или по расписанию)

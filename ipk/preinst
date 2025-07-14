@@ -23,6 +23,7 @@ if [ -s "$CONFIG_FILE" ]; then
     geoblock_countries_str="$(grep "GEOBLOCK_COUNTRIES" "$CONFIG_FILE")"
     read_ndm_str="$(grep "READ_NDM_LOCKOUT_IPSETS" "$CONFIG_FILE")"
     ndm_lockout_time_str="$(grep "LOCKOUT_IPSET_BANTIME" "$CONFIG_FILE")"
+    ports_forwarded_str="$(grep "PORTS_FORWARDED" "$CONFIG_FILE")"
     if [ -z "$rules_mask_str" ]; then
         sed -i '/^RECENT_CONNECTIONS_TIME=/iRULES_MASK=\"255.255.255.255\"' "$CONFIG_FILE"
         printf "В имеющийся ascn.conf добавлена новая строка ${BOLD_TEXT}RULES_MASK=\"255.255.255.255\"${NO_STYLE}\n"
@@ -62,6 +63,11 @@ if [ -s "$CONFIG_FILE" ]; then
     if [ -z "$ndm_lockout_time_str" ]; then
         printf "LOCKOUT_IPSET_BANTIME=864000\n" >>"$CONFIG_FILE"
         printf "В имеющийся ascn.conf добавлена новая строка ${BOLD_TEXT}LOCKOUT_IPSET_BANTIME=864000${NO_STYLE}\n"
+    fi
+    if [ -z "$ports_forwarded_str" ]; then
+        source "$CONFIG_FILE"
+        sed -i "/^PORTS=/aPORTS_FORWARDED=\"$PORTS\"" "$CONFIG_FILE"
+        printf "В имеющийся ascn.conf добавлена новая строка ${BOLD_TEXT}PORTS_FORWARDED${NO_STYLE}\n"
     fi
 fi
 if [ -s "$CRONTAB_FILE" ]; then

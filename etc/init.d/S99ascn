@@ -14,6 +14,23 @@ ASCN_GEO_LOCK_FILE="/tmp/ascn_geo.lock"
 ASCN_GEO_LOAD_ERROR_FILE="/tmp/ascn_geo_load_error"
 PATH=/opt/bin:/opt/sbin:/sbin:/usr/sbin:/bin:/usr/bin
 
+print_message() {
+  msg_type="$1"
+  msg_text="$2"
+  logger -p "${msg_type}" -t "Antiscan" "${msg_text}"
+  case $msg_type in
+  error)
+    echo "${msg_text}" >&2
+    ;;
+  notice)
+    [ -z "$3" ] && echo "${msg_text}"
+    ;;
+  warning)
+    [ "$3" == "1" ] && echo "${msg_text}" >&2
+    ;;
+  esac
+}
+
 read_config() {
   source "$CONFIG_FILE"
   check_config
@@ -23,30 +40,109 @@ read_config() {
 }
 
 check_config() {
-  [ -z "$RULES_MASK" ] && RULES_MASK="255.255.255.255"
+  if [ -z "$ISP_INTERFACES" ]; then
+    print_message "error" "В ascn.conf не указаны интерфейсы!"
+    exit 3
+  fi
 
+  if [ -z "$PORTS" ] && [ -z "$PORTS_FORWARDED" ]; then
+    print_message "error" "В ascn.conf не указаны порты!"
+    exit 3
+  else
+    ports_count=0
+    ports_forwarded_count=0
+    need_to_exit=0
+    if [ -n "$PORTS" ]; then
+      ports_count=$(
+        set -- $(echo "$PORTS" | tr ',:' ' ')
+        echo $#
+      )
+    fi
+    if [ -n "$PORTS_FORWARDED" ]; then
+      ports_forwarded_count=$(
+        set -- $(echo "$PORTS_FORWARDED" | tr ',:' ' ')
+        echo $#
+      )
+    fi
+    if [ "$ports_count" -gt 15 ]; then
+      print_message "error" "Количество указанных портов превышает 15"
+      need_to_exit=1
+    fi
+    if [ "$ports_forwarded_count" -gt 15 ]; then
+      print_message "error" "Количество указанных переадресованных портов превышает 15"
+      need_to_exit=1
+    fi
+    [ "$need_to_exit" -eq 1 ] && exit 4
+  fi
+
+  if [ -z "$RECENT_CONNECTIONS_TIME" ] || [ -z "$RECENT_CONNECTIONS_HITCOUNT" ] || [ -z "$RECENT_CONNECTIONS_LIMIT" ] ||
+    [ -z "$DIFFERENT_IP_THRESHOLD" ] || [ -z "$RECENT_CONNECTIONS_BANTIME" ] || [ -z "$DIFFERENT_IP_CANDIDATES_STORAGETIME" ] || [ -z "$SUBNETS_BANTIME" ]; then
+    print_message "error" "В ascn.conf не указаны параметры работы Antiscan!"
+    exit 3
+  fi
+
+  [ -z "$RULES_MASK" ] && RULES_MASK="255.255.255.255"
   [ -z "$SAVE_IPSETS" ] && SAVE_IPSETS=0
-  [ -z "$CUSTOM_LISTS_BLOCK_MODE" ] && CUSTOM_LISTS_BLOCK_MODE=0
   [ -z "$USE_CUSTOM_EXCLUDE_LIST" ] && USE_CUSTOM_EXCLUDE_LIST=0
-  [ -z "$GEOBLOCK_MODE" ] && GEOBLOCK_MODE=0
   [ -z "$READ_NDM_LOCKOUT_IPSETS" ] && READ_NDM_LOCKOUT_IPSETS=0
   [ -z "$LOCKOUT_IPSET_BANTIME" ] && LOCKOUT_IPSET_BANTIME=0
+
+  if [ "$RECENT_CONNECTIONS_BANTIME" -gt 2147483 ] || [ "$DIFFERENT_IP_CANDIDATES_STORAGETIME" -gt 2147483 ] || [ "$SUBNETS_BANTIME" -gt 2147483 ] || [ "$LOCKOUT_IPSET_BANTIME" -gt 2147483 ]; then
+    print_message "error" "Срок хранения записей в списках не может превышать 2147483 секунды"
+    exit 4
+  fi
+
+  if [ -z "$CUSTOM_LISTS_BLOCK_MODE" ]; then
+    CUSTOM_LISTS_BLOCK_MODE=0
+  else
+    case "$CUSTOM_LISTS_BLOCK_MODE" in
+    0 | blacklist | whitelist)
+      :
+      ;;
+    *)
+      print_message "error" "Указан недопустимый режим блокировки по пользовательским спискам"
+      exit 4
+      ;;
+    esac
+  fi
+  if [ -z "$GEOBLOCK_MODE" ]; then
+    GEOBLOCK_MODE=0
+  else
+    case "$GEOBLOCK_MODE" in
+    0 | blacklist | whitelist)
+      :
+      ;;
+    *)
+      print_message "error" "Указан недопустимый режим геоблокировки"
+      exit 4
+      ;;
+    esac
+  fi
 
   if [ -z "$IPSETS_DIRECTORY" ] && [[ "$SAVE_IPSETS" == "1" || "$GEOBLOCK_MODE" != "0" ]]; then
     print_message "error" "В ascn.conf не указан путь для сохранения ipset!"
     exit 3
   else
-    if [ "$GEOBLOCK_MODE" != 0 ] && [ -z "$GEOBLOCK_COUNTRIES" ]; then
-      print_message "error" "В ascn.conf не указаны страны для геоблокировки!"
-      exit 3
-    else
-      count=$(
-        set -- $GEOBLOCK_COUNTRIES
-        echo $#
-      )
-      if [ "$count" -gt 8 ]; then
-        print_message "error" "Количество указанных стран для геоблокировки превышает 8"
-        exit 4
+    if [ "$GEOBLOCK_MODE" != "0" ]; then
+      if [ -z "$GEOBLOCK_COUNTRIES" ]; then
+        print_message "error" "В ascn.conf не указаны страны для геоблокировки!"
+        exit 3
+      else
+        echo "$GEOBLOCK_COUNTRIES" | grep -Eq '^([A-Z]{2})( +[A-Z]{2} {0,})*$'
+        validation_result=$?
+        if [ "$validation_result" -eq 0 ]; then
+          count=$(
+            set -- $GEOBLOCK_COUNTRIES
+            echo $#
+          )
+          if [ "$count" -gt 8 ]; then
+            print_message "error" "Количество указанных стран для геоблокировки превышает 8"
+            exit 4
+          fi
+        else
+          print_message "error" "Список стран геоблокировки содержит недопустимые символы"
+          exit 3
+        fi
       fi
     fi
   fi
@@ -126,26 +222,10 @@ load_kernel_modules() {
   fi
 }
 
-print_message() {
-  msg_type="$1"
-  msg_text="$2"
-  logger -p "${msg_type}" -t "Antiscan" "${msg_text}"
-  case $msg_type in
-  error)
-    echo "${msg_text}" >&2
-    ;;
-  notice)
-    [ -z "$3" ] && echo "${msg_text}"
-    ;;
-  warning)
-    [ "$3" == "1" ] && echo "${msg_text}" >&2
-    ;;
-  esac
-}
-
 write_temp_config() {
   echo "ISP_INTERFACES=\"$ISP_INTERFACES\"" >"$CONFIG_FILE_TEMP"
   echo "PORTS=\"$PORTS\"" >>"$CONFIG_FILE_TEMP"
+  echo "PORTS_FORWARDED=\"$PORTS_FORWARDED\"" >>"$CONFIG_FILE_TEMP"
   echo "RECENT_CONNECTIONS_TIME=$RECENT_CONNECTIONS_TIME" >>"$CONFIG_FILE_TEMP"
   echo "RECENT_CONNECTIONS_HITCOUNT=$RECENT_CONNECTIONS_HITCOUNT" >>"$CONFIG_FILE_TEMP"
   echo "RECENT_CONNECTIONS_LIMIT=$RECENT_CONNECTIONS_LIMIT" >>"$CONFIG_FILE_TEMP"
@@ -206,47 +286,53 @@ add_rules() {
   if ! iptables -L ANTISCAN -w -t filter -n >/dev/null 2>&1; then
     iptables -N ANTISCAN -w -t filter
     if [ -n "$(ipset -q list ascn_custom_exclude)" ]; then
-      _iptables -A ANTISCAN -w -t filter -p tcp -m multiport --dports $PORTS -m set --match-set ascn_custom_exclude src -j RETURN
+      _iptables -A ANTISCAN -w -t filter -m set --match-set ascn_custom_exclude src -j RETURN
     fi
     if [ -n "$(ipset -q list ascn_custom_blacklist)" ]; then
-      _iptables -A ANTISCAN -w -t filter -p tcp -m multiport --dports $PORTS -m set --match-set ascn_custom_blacklist src -j DROP
+      _iptables -A ANTISCAN -w -t filter -m set --match-set ascn_custom_blacklist src -j DROP
     fi
     if [ -n "$(ipset -q list ascn_custom_whitelist)" ]; then
-      _iptables -A ANTISCAN -w -t filter -p tcp -m multiport --dports $PORTS -m set ! --match-set ascn_custom_whitelist src -j DROP
+      _iptables -A ANTISCAN -w -t filter -m set ! --match-set ascn_custom_whitelist src -j DROP
     fi
     if [ -n "$(ipset -q list ascn_geo_blacklist)" ]; then
-      _iptables -A ANTISCAN -w -t filter -p tcp -m multiport --dports $PORTS -m set --match-set ascn_geo_blacklist src -j DROP
+      _iptables -A ANTISCAN -w -t filter -m set --match-set ascn_geo_blacklist src -j DROP
     fi
     if [ -n "$(ipset -q list ascn_geo_whitelist)" ]; then
-      _iptables -A ANTISCAN -w -t filter -p tcp -m multiport --dports $PORTS -m set ! --match-set ascn_geo_whitelist src -j DROP
+      _iptables -A ANTISCAN -w -t filter -m set ! --match-set ascn_geo_whitelist src -j DROP
     fi
     if [ -n "$(ipset -q list ascn_ndm_lockout)" ]; then
-      _iptables -A ANTISCAN -w -t filter -p tcp -m multiport --dports $PORTS -m set --match-set ascn_ndm_lockout src -j DROP
+      _iptables -A ANTISCAN -w -t filter -m set --match-set ascn_ndm_lockout src -j DROP
     fi
-    _iptables -A ANTISCAN -w -t filter -p tcp -m multiport --dports $PORTS -m set --match-set ascn_subnets src -j DROP
-    _iptables -A ANTISCAN -w -t filter -p tcp -m multiport --dports $PORTS -j SET --add-set ascn_candidates src
-    _iptables -A ANTISCAN -w -t filter -p tcp -m multiport --dports $PORTS -m set --match-set ascn_ips src -j DROP
-    _iptables -A ANTISCAN -w -t filter -p tcp -m multiport --dports $PORTS -m connlimit --connlimit-above $RECENT_CONNECTIONS_LIMIT --connlimit-mask $RULES_MASK -j SET --add-set ascn_ips src
-    _iptables -A ANTISCAN -w -t filter -p tcp -m multiport --dports $PORTS -m conntrack --ctstate NEW -m recent --update --seconds $RECENT_CONNECTIONS_TIME --hitcount $RECENT_CONNECTIONS_HITCOUNT --name scanners --mask $RULES_MASK -j SET --add-set ascn_ips src
-    _iptables -A ANTISCAN -w -t filter -p tcp -m multiport --dports $PORTS -m conntrack --ctstate NEW -m recent --set --name scanners --mask $RULES_MASK
+    _iptables -A ANTISCAN -w -t filter -m set --match-set ascn_subnets src -j DROP
+    _iptables -A ANTISCAN -w -t filter -j SET --add-set ascn_candidates src
+    _iptables -A ANTISCAN -w -t filter -m set --match-set ascn_ips src -j DROP
+    _iptables -A ANTISCAN -w -t filter -m connlimit --connlimit-above $RECENT_CONNECTIONS_LIMIT --connlimit-mask $RULES_MASK -j SET --add-set ascn_ips src
+    _iptables -A ANTISCAN -w -t filter -m conntrack --ctstate NEW -m recent --update --seconds $RECENT_CONNECTIONS_TIME --hitcount $RECENT_CONNECTIONS_HITCOUNT --name scanners --mask $RULES_MASK -j SET --add-set ascn_ips src
+    _iptables -A ANTISCAN -w -t filter -m conntrack --ctstate NEW -m recent --set --name scanners --mask $RULES_MASK
     _iptables -A ANTISCAN -w -t filter -j RETURN
   fi
 
   if iptables -L ANTISCAN -w -t filter -n >/dev/null 2>&1; then
-    for CHAIN in "INPUT" "FORWARD"; do
-      for INTERFACE in $ISP_INTERFACES; do
-        _iptables -I $CHAIN -w -t filter -i $INTERFACE -p tcp -m multiport --dports $PORTS -j ANTISCAN
-      done
+    for INTERFACE in $ISP_INTERFACES; do
+      if [ -n "$PORTS" ]; then
+        _iptables -I INPUT -w -t filter -i $INTERFACE -p tcp -m multiport --dports $PORTS -j ANTISCAN
+      fi
+      if [ -n "$PORTS_FORWARDED" ]; then
+        _iptables -I FORWARD -w -t filter -i $INTERFACE -p tcp -m multiport --dports $PORTS_FORWARDED -j ANTISCAN
+      fi
     done
   fi
 }
 
 remove_rules() {
   if iptables -L ANTISCAN -w -t filter -n >/dev/null 2>&1; then
-    for CHAIN in "INPUT" "FORWARD"; do
-      for INTERFACE in $ISP_INTERFACES; do
-        _iptables -D $CHAIN -w -t filter -i $INTERFACE -p tcp -m multiport --dports $PORTS -j ANTISCAN
-      done
+    for INTERFACE in $ISP_INTERFACES; do
+      if [ -n "$PORTS" ]; then
+        _iptables -D INPUT -w -t filter -i $INTERFACE -p tcp -m multiport --dports $PORTS -j ANTISCAN
+      fi
+      if [ -n "$PORTS_FORWARDED" ]; then
+        _iptables -D FORWARD -w -t filter -i $INTERFACE -p tcp -m multiport --dports $PORTS_FORWARDED -j ANTISCAN
+      fi
     done
     iptables -F ANTISCAN -w -t filter
     iptables -X ANTISCAN -w -t filter
@@ -741,7 +827,7 @@ show_ipsets() {
           text="подсети"
           text_1="подсетей"
         fi
-        ipset_data="$(ipset list ascn_$1 -s | tail -n +8)"
+        ipset_data="$(ipset -q list ascn_$1 -s | tail -n +8)"
         [ -z "$ipset_data" ] && banned_count=0 || banned_count="$(echo "$ipset_data" | grep -c '^')"
         if [ "$banned_count" -eq 0 ]; then
           echo "Заблокированные ${text} отсутствуют"
@@ -796,7 +882,7 @@ export_ipsets() {
         local ipsets_list="ascn_candidates ascn_ips ascn_subnets ascn_ndm_lockout"
         for set_name in $ipsets_list; do
           ipset_filename="$IPSETS_DIRECTORY/ipset_$set_name.txt"
-          banned_count="$(ipset list $set_name | tail -n +8 | grep -c '^')"
+          banned_count="$(ipset -q list $set_name | tail -n +8 | grep -c '^')"
           if [ "$banned_count" -ne 0 ]; then
             if ! ipset save "$set_name" >"$ipset_filename"; then
               print_message "error" "Не удалось экспортировать ipset $set_name!"
@@ -962,7 +1048,7 @@ flush_ipsets() {
         ipset_to_clear="$1"
         question_text=""
         if [ -z "$ipset_to_clear" ]; then
-          ipset_to_clear="candidates ips subnets custom_whitelist custom_blacklist custom_exclude geo_whitelist geo_blacklist ndm_lockout"
+          ipset_to_clear="candidates ips subnets geo_whitelist geo_blacklist ndm_lockout"
           question_text="Очистить все списки адресов? (Y/N): "
         else
           ipset_readable_name=""
@@ -986,7 +1072,7 @@ flush_ipsets() {
               ;;
             "custom_whitelist" | "custom_blacklist" | "custom_exclude")
               local custom_set_filename="$ANTISCAN_DIR/$name.txt"
-              [ -f "$custom_set_filename" ] && echo >"$custom_set_filename"
+              [ -f "$custom_set_filename" ] && >"$custom_set_filename"
               ;;
             *)
               set_filename="$IPSETS_DIRECTORY/ipset_$name.txt"
@@ -1111,6 +1197,10 @@ retry_load_geo() {
   fi
 }
 
+show_version() {
+  opkg info antiscan | sed -n 's/^Version/Версия Antiscan/p'
+}
+
 case "$1" in
 start)
   start
@@ -1125,9 +1215,6 @@ restart)
   ;;
 status)
   get_status
-  ;;
-status_nc)
-  get_status | awk '{ gsub(/\033\[[0-9;]*m/, ""); print }'
   ;;
 list)
   show_ipsets $2
@@ -1159,7 +1246,10 @@ update_crontab)
 retry_load_geo)
   retry_load_geo
   ;;
+version)
+  show_version
+  ;;
 *)
-  echo "Использование: $0 {start|stop|restart|status|list|reload|flush|update_rules|read_candidates|read_ndm_ipsets|save_ipsets|update_ipsets|update_crontab}"
+  echo "Использование: $0 {start|stop|restart|status|list|reload|flush|version|update_rules|read_candidates|read_ndm_ipsets|save_ipsets|update_ipsets|update_crontab}"
   ;;
 esac
