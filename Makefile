@@ -1,5 +1,5 @@
 SHELL := /bin/bash
-VERSION := $(shell cat VERSION)
+VERSION := $(shell sed -n 's/^ASCN_VERSION="\([^"]*\)"$$/\1/p' etc/init.d/S99ascn)
 
 .DEFAULT_GOAL := antiscan
 

@@ -24,6 +24,9 @@ if [ -s "$CONFIG_FILE" ]; then
     read_ndm_str="$(grep "READ_NDM_LOCKOUT_IPSETS" "$CONFIG_FILE")"
     ndm_lockout_time_str="$(grep "LOCKOUT_IPSET_BANTIME" "$CONFIG_FILE")"
     ports_forwarded_str="$(grep "PORTS_FORWARDED" "$CONFIG_FILE")"
+	honeypot_ports_str="$(grep "HONEYPOT_PORTS" "$CONFIG_FILE")"
+	honeypot_bantime_str="$(grep "HONEYPOT_BANTIME" "$CONFIG_FILE")"
+	save_on_exit_str="$(grep "SAVE_ON_EXIT" "$CONFIG_FILE")"
     if [ -z "$rules_mask_str" ]; then
         sed -i '/^RECENT_CONNECTIONS_TIME=/iRULES_MASK=\"255.255.255.255\"' "$CONFIG_FILE"
         printf "В имеющийся ascn.conf добавлена новая строка ${BOLD_TEXT}RULES_MASK=\"255.255.255.255\"${NO_STYLE}\n"
@@ -68,6 +71,18 @@ if [ -s "$CONFIG_FILE" ]; then
         source "$CONFIG_FILE"
         sed -i "/^PORTS=/aPORTS_FORWARDED=\"$PORTS\"" "$CONFIG_FILE"
         printf "В имеющийся ascn.conf добавлена новая строка ${BOLD_TEXT}PORTS_FORWARDED${NO_STYLE}\n"
+    fi
+	if [ -z "$honeypot_ports_str" ]; then
+        sed -i "/^PORTS_FORWARDED=/aHONEYPOT_PORTS=\"\"" "$CONFIG_FILE"
+        printf "В имеющийся ascn.conf добавлена новая строка ${BOLD_TEXT}HONEYPOT_PORTS=\"\"${NO_STYLE}\n"
+    fi
+	if [ -z "$honeypot_bantime_str" ]; then
+        sed -i "/^HONEYPOT_PORTS=/aHONEYPOT_BANTIME=864000" "$CONFIG_FILE"
+        printf "В имеющийся ascn.conf добавлена новая строка ${BOLD_TEXT}HONEYPOT_BANTIME=864000${NO_STYLE}\n"
+    fi
+	if [ -z "$save_on_exit_str" ]; then
+        sed -i "/^SAVE_IPSETS=/aSAVE_ON_EXIT=0" "$CONFIG_FILE"
+        printf "В имеющийся ascn.conf добавлена новая строка ${BOLD_TEXT}SAVE_ON_EXIT=0${NO_STYLE}\n"
     fi
 fi
 if [ -s "$CRONTAB_FILE" ]; then

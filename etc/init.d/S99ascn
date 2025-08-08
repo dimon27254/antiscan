@@ -12,6 +12,8 @@ ASCN_TEMP_FILE="/tmp/ascn.run"
 ASCN_LOCK_FILE="/tmp/ascn.lock"
 ASCN_GEO_LOCK_FILE="/tmp/ascn_geo.lock"
 ASCN_GEO_LOAD_ERROR_FILE="/tmp/ascn_geo_load_error"
+ASCN_VERSION="1.8"
+
 PATH=/opt/bin:/opt/sbin:/sbin:/usr/sbin:/bin:/usr/bin
 
 print_message() {
@@ -51,6 +53,7 @@ check_config() {
   else
     ports_count=0
     ports_forwarded_count=0
+    ports_honeypot_count=0
     need_to_exit=0
     if [ -n "$PORTS" ]; then
       ports_count=$(
@@ -64,12 +67,22 @@ check_config() {
         echo $#
       )
     fi
+    if [ -n "$HONEYPOT_PORTS" ]; then
+      ports_honeypot_count=$(
+        set -- $(echo "$HONEYPOT_PORTS" | tr ',:' ' ')
+        echo $#
+      )
+    fi
     if [ "$ports_count" -gt 15 ]; then
       print_message "error" "Количество указанных портов превышает 15"
       need_to_exit=1
     fi
     if [ "$ports_forwarded_count" -gt 15 ]; then
       print_message "error" "Количество указанных переадресованных портов превышает 15"
+      need_to_exit=1
+    fi
+    if [ "$ports_honeypot_count" -gt 15 ]; then
+      print_message "error" "Количество указанных портов для ловушки превышает 15"
       need_to_exit=1
     fi
     [ "$need_to_exit" -eq 1 ] && exit 4
@@ -86,8 +99,9 @@ check_config() {
   [ -z "$USE_CUSTOM_EXCLUDE_LIST" ] && USE_CUSTOM_EXCLUDE_LIST=0
   [ -z "$READ_NDM_LOCKOUT_IPSETS" ] && READ_NDM_LOCKOUT_IPSETS=0
   [ -z "$LOCKOUT_IPSET_BANTIME" ] && LOCKOUT_IPSET_BANTIME=0
+  [ -z "$HONEYPOT_BANTIME" ] && HONEYPOT_BANTIME=0
 
-  if [ "$RECENT_CONNECTIONS_BANTIME" -gt 2147483 ] || [ "$DIFFERENT_IP_CANDIDATES_STORAGETIME" -gt 2147483 ] || [ "$SUBNETS_BANTIME" -gt 2147483 ] || [ "$LOCKOUT_IPSET_BANTIME" -gt 2147483 ]; then
+  if [ "$RECENT_CONNECTIONS_BANTIME" -gt 2147483 ] || [ "$DIFFERENT_IP_CANDIDATES_STORAGETIME" -gt 2147483 ] || [ "$SUBNETS_BANTIME" -gt 2147483 ] || [ "$LOCKOUT_IPSET_BANTIME" -gt 2147483 ] || [ "$HONEYPOT_BANTIME" -gt 2147483 ]; then
     print_message "error" "Срок хранения записей в списках не может превышать 2147483 секунды"
     exit 4
   fi
@@ -146,6 +160,10 @@ check_config() {
       fi
     fi
   fi
+
+  if [ -z "$SAVE_ON_EXIT" ]; then
+    SAVE_ON_EXIT=0
+  fi
 }
 
 read_config
@@ -190,6 +208,10 @@ stop() {
       exit 2
     fi
 
+    if [ "$SAVE_ON_EXIT" == "1" ] || [ "$1" == "1" ]; then
+      export_ipsets
+    fi
+
     remove_rules
     destroy_ipsets
     destroy_temp_config
@@ -226,6 +248,8 @@ write_temp_config() {
   echo "ISP_INTERFACES=\"$ISP_INTERFACES\"" >"$CONFIG_FILE_TEMP"
   echo "PORTS=\"$PORTS\"" >>"$CONFIG_FILE_TEMP"
   echo "PORTS_FORWARDED=\"$PORTS_FORWARDED\"" >>"$CONFIG_FILE_TEMP"
+  echo "HONEYPOT_PORTS=\"$HONEYPOT_PORTS\"" >>"$CONFIG_FILE_TEMP"
+  echo "HONEYPOT_BANTIME=\"$HONEYPOT_BANTIME\"" >>"$CONFIG_FILE_TEMP"
   echo "RECENT_CONNECTIONS_TIME=$RECENT_CONNECTIONS_TIME" >>"$CONFIG_FILE_TEMP"
   echo "RECENT_CONNECTIONS_HITCOUNT=$RECENT_CONNECTIONS_HITCOUNT" >>"$CONFIG_FILE_TEMP"
   echo "RECENT_CONNECTIONS_LIMIT=$RECENT_CONNECTIONS_LIMIT" >>"$CONFIG_FILE_TEMP"
@@ -236,6 +260,7 @@ write_temp_config() {
   echo "RULES_MASK=\"$RULES_MASK\"" >>"$CONFIG_FILE_TEMP"
   echo "IPSETS_DIRECTORY=\"$IPSETS_DIRECTORY\"" >>"$CONFIG_FILE_TEMP"
   echo "SAVE_IPSETS=$SAVE_IPSETS" >>"$CONFIG_FILE_TEMP"
+  echo "SAVE_ON_EXIT=$SAVE_ON_EXIT" >>"$CONFIG_FILE_TEMP"
   echo "USE_CUSTOM_EXCLUDE_LIST=$USE_CUSTOM_EXCLUDE_LIST" >>"$CONFIG_FILE_TEMP"
   echo "CUSTOM_LISTS_BLOCK_MODE=\"$CUSTOM_LISTS_BLOCK_MODE\"" >>"$CONFIG_FILE_TEMP"
   echo "GEOBLOCK_MODE=\"$GEOBLOCK_MODE\"" >>"$CONFIG_FILE_TEMP"
@@ -247,6 +272,7 @@ write_temp_config() {
 destroy_temp_config() {
   IPSETS_DIRECTORY=""
   SAVE_IPSETS=0
+  SAVE_ON_EXIT=0
   RULES_MASK="255.255.255.255"
   CUSTOM_LISTS_BLOCK_MODE=0
   USE_CUSTOM_EXCLUDE_LIST=0
@@ -254,6 +280,7 @@ destroy_temp_config() {
   GEOBLOCK_COUNTRIES=""
   READ_NDM_LOCKOUT_IPSETS=0
   LOCKOUT_IPSET_BANTIME=0
+  HONEYPOT_BANTIME=0
   rm -f "$CONFIG_FILE_TEMP"
   source "$CONFIG_FILE"
 }
@@ -266,8 +293,11 @@ _iptables() {
   iptables -w -C $RULE 2>/dev/null
   exists=$?
 
-  if echo "$RULE" | grep -q 'ANTISCAN'; then
+  if echo "$RULE" | grep -q '\bANTISCAN\b'; then
     iptables -L ANTISCAN -w -t filter -n >/dev/null 2>&1
+    chain_exists=$?
+  elif echo "$RULE" | grep -q '\bANTISCAN_HONEYPOT\b'; then
+    iptables -L ANTISCAN_HONEYPOT -w -t filter -n >/dev/null 2>&1
     chain_exists=$?
   else
     chain_exists=0
@@ -288,24 +318,29 @@ add_rules() {
     if [ -n "$(ipset -q list ascn_custom_exclude)" ]; then
       _iptables -A ANTISCAN -w -t filter -m set --match-set ascn_custom_exclude src -j RETURN
     fi
+
     if [ -n "$(ipset -q list ascn_custom_blacklist)" ]; then
       _iptables -A ANTISCAN -w -t filter -m set --match-set ascn_custom_blacklist src -j DROP
-    fi
-    if [ -n "$(ipset -q list ascn_custom_whitelist)" ]; then
+    elif [ -n "$(ipset -q list ascn_custom_whitelist)" ]; then
       _iptables -A ANTISCAN -w -t filter -m set ! --match-set ascn_custom_whitelist src -j DROP
     fi
+
     if [ -n "$(ipset -q list ascn_geo_blacklist)" ]; then
       _iptables -A ANTISCAN -w -t filter -m set --match-set ascn_geo_blacklist src -j DROP
-    fi
-    if [ -n "$(ipset -q list ascn_geo_whitelist)" ]; then
+    elif [ -n "$(ipset -q list ascn_geo_whitelist)" ]; then
       _iptables -A ANTISCAN -w -t filter -m set ! --match-set ascn_geo_whitelist src -j DROP
     fi
+
     if [ -n "$(ipset -q list ascn_ndm_lockout)" ]; then
       _iptables -A ANTISCAN -w -t filter -m set --match-set ascn_ndm_lockout src -j DROP
     fi
+
+    if [ -n "$(ipset -q list ascn_honeypot)" ]; then
+      _iptables -A ANTISCAN -w -t filter -m set --match-set ascn_honeypot src -j DROP
+    fi
     _iptables -A ANTISCAN -w -t filter -m set --match-set ascn_subnets src -j DROP
-    _iptables -A ANTISCAN -w -t filter -j SET --add-set ascn_candidates src
     _iptables -A ANTISCAN -w -t filter -m set --match-set ascn_ips src -j DROP
+    _iptables -A ANTISCAN -w -t filter -j SET --add-set ascn_candidates src
     _iptables -A ANTISCAN -w -t filter -m connlimit --connlimit-above $RECENT_CONNECTIONS_LIMIT --connlimit-mask $RULES_MASK -j SET --add-set ascn_ips src
     _iptables -A ANTISCAN -w -t filter -m conntrack --ctstate NEW -m recent --update --seconds $RECENT_CONNECTIONS_TIME --hitcount $RECENT_CONNECTIONS_HITCOUNT --name scanners --mask $RULES_MASK -j SET --add-set ascn_ips src
     _iptables -A ANTISCAN -w -t filter -m conntrack --ctstate NEW -m recent --set --name scanners --mask $RULES_MASK
@@ -322,6 +357,44 @@ add_rules() {
       fi
     done
   fi
+
+  if [ -n "$HONEYPOT_PORTS" ]; then
+    if ! iptables -L ANTISCAN_HONEYPOT -w -t filter -n >/dev/null 2>&1; then
+      iptables -N ANTISCAN_HONEYPOT -w -t filter
+      if [ -n "$(ipset -q list ascn_custom_exclude)" ]; then
+        _iptables -A ANTISCAN_HONEYPOT -w -t filter -m set --match-set ascn_custom_exclude src -j RETURN
+      fi
+
+      if [ -n "$(ipset -q list ascn_custom_blacklist)" ]; then
+        _iptables -A ANTISCAN_HONEYPOT -w -t filter -m set --match-set ascn_custom_blacklist src -j DROP
+      elif [ -n "$(ipset -q list ascn_custom_whitelist)" ]; then
+        _iptables -A ANTISCAN_HONEYPOT -w -t filter -m set ! --match-set ascn_custom_whitelist src -j DROP
+      fi
+
+      if [ -n "$(ipset -q list ascn_geo_blacklist)" ]; then
+        _iptables -A ANTISCAN_HONEYPOT -w -t filter -m set --match-set ascn_geo_blacklist src -j DROP
+      elif [ -n "$(ipset -q list ascn_geo_whitelist)" ]; then
+        _iptables -A ANTISCAN_HONEYPOT -w -t filter -m set ! --match-set ascn_geo_whitelist src -j DROP
+      fi
+
+      if [ -n "$(ipset -q list ascn_ndm_lockout)" ]; then
+        _iptables -A ANTISCAN_HONEYPOT -w -t filter -m set --match-set ascn_ndm_lockout src -j DROP
+      fi
+
+      if [ -n "$(ipset -q list ascn_honeypot)" ]; then
+        _iptables -A ANTISCAN_HONEYPOT -w -t filter -m set --match-set ascn_honeypot src -j DROP
+      fi
+      _iptables -A ANTISCAN_HONEYPOT -w -t filter -m set --match-set ascn_subnets src -j DROP
+      _iptables -A ANTISCAN_HONEYPOT -w -t filter -m set --match-set ascn_ips src -j DROP
+      _iptables -A ANTISCAN_HONEYPOT -w -t filter -j SET --add-set ascn_honeypot src
+    fi
+
+    if iptables -L ANTISCAN_HONEYPOT -w -t filter -n >/dev/null 2>&1; then
+      for INTERFACE in $ISP_INTERFACES; do
+        _iptables -I INPUT -w -t filter -i $INTERFACE -p tcp -m multiport --dports $HONEYPOT_PORTS -j ANTISCAN_HONEYPOT
+      done
+    fi
+  fi
 }
 
 remove_rules() {
@@ -336,6 +409,16 @@ remove_rules() {
     done
     iptables -F ANTISCAN -w -t filter
     iptables -X ANTISCAN -w -t filter
+  fi
+
+  if [ -n "$HONEYPOT_PORTS" ]; then
+    if iptables -L ANTISCAN_HONEYPOT -w -t filter -n >/dev/null 2>&1; then
+      for INTERFACE in $ISP_INTERFACES; do
+        _iptables -D INPUT -w -t filter -i $INTERFACE -p tcp -m multiport --dports $HONEYPOT_PORTS -j ANTISCAN_HONEYPOT
+      done
+      iptables -F ANTISCAN_HONEYPOT -w -t filter
+      iptables -X ANTISCAN_HONEYPOT -w -t filter
+    fi
   fi
 }
 
@@ -354,6 +437,10 @@ create_ipsets() {
 
   if [ "$READ_NDM_LOCKOUT_IPSETS" -eq 1 ] && [ -z "$(ipset -q list ascn_ndm_lockout)" ]; then
     add_ipset "ascn_ndm_lockout" "hash:ip" $LOCKOUT_IPSET_BANTIME
+  fi
+
+  if [ -n "$HONEYPOT_PORTS" ] && [ -z "$(ipset -q list ascn_honeypot)" ]; then
+    add_ipset "ascn_honeypot" "hash:ip" $HONEYPOT_BANTIME
   fi
 
   if [ "$CUSTOM_LISTS_BLOCK_MODE" == "blacklist" ] || [ "$CUSTOM_LISTS_BLOCK_MODE" == "whitelist" ]; then
@@ -396,6 +483,9 @@ add_ipset() {
   "ascn_ndm_lockout")
     ipset_timeout_string=$([ "$LOCKOUT_IPSET_BANTIME" -ne 0 ] && echo "timeout "$LOCKOUT_IPSET_BANTIME"")
     ;;
+  "ascn_honeypot")
+    ipset_timeout_string=$([ "$HONEYPOT_BANTIME" -ne 0 ] && echo "timeout "$HONEYPOT_BANTIME"")
+    ;;
   esac
 
   if [ "$SAVE_IPSETS" -eq 1 ] && [ -s "$ipset_file" ]; then
@@ -415,7 +505,7 @@ add_ipset() {
 }
 
 destroy_ipsets() {
-  local ipsets_list="ascn_candidates ascn_ips ascn_subnets ascn_custom_exclude ascn_custom_blacklist ascn_custom_whitelist ascn_geo_blacklist ascn_geo_whitelist ascn_ndm_lockout"
+  local ipsets_list="ascn_candidates ascn_ips ascn_subnets ascn_custom_exclude ascn_custom_blacklist ascn_custom_whitelist ascn_geo_blacklist ascn_geo_whitelist ascn_ndm_lockout ascn_honeypot"
   for set in $ipsets_list; do
     if [ -n "$(ipset -q list $set)" ]; then
       ipset destroy $set
@@ -597,7 +687,13 @@ read_ip_candidates() {
       if [ -n "$(ipset -q list ascn_ips)" ] && [ -n "$(ipset -q list ascn_candidates)" ] && [ -n "$(ipset -q list ascn_subnets)" ]; then
         ipset_candidates="$(ipset save ascn_candidates | tail -n +2)"
         ipset_ips="$(ipset save ascn_ips | tail -n +2)"
-        ipset_combined_sorted="$(echo "${ipset_candidates}${ipset_ips}" | sort)"
+
+        ipset_honeypot_ips=""
+        if [ -n "$(ipset -q list ascn_honeypot)" ]; then
+          ipset_honeypot_ips="$(ipset save ascn_honeypot | tail -n +2)"
+        fi
+
+        ipset_combined_sorted="$(echo "${ipset_candidates}${ipset_ips}${ipset_honeypot_ips}" | sort)"
 
         if [ -n "$ipset_combined_sorted" ]; then
           [ -f "$ASCN_REGEXP_FILE" ] && rm "$ASCN_REGEXP_FILE"
@@ -620,6 +716,8 @@ EOF
           if [ -n "$regexp_variable" ]; then
             ipset_candidates_sorted="$(echo "$ipset_candidates" | sort)"
             ipset_ips_sorted="$(echo "$ipset_ips" | sort)"
+            ipset_honeypot_sorted="$(echo "$ipset_honeypot_ips" | sort)"
+
             ips_regexp="$(echo "$regexp_variable" | sed 's/.$//')"
 
             if [ -n "$ipset_candidates_sorted" ]; then
@@ -630,6 +728,11 @@ EOF
             if [ -n "$ipset_ips_sorted" ]; then
               ipset flush ascn_ips
               echo "$ipset_ips_sorted" | grep -vE "(${ips_regexp})" | ipset -! restore
+            fi
+
+            if [ -n "$ipset_honeypot_sorted" ]; then
+              ipset flush ascn_honeypot
+              echo "$ipset_honeypot_sorted" | grep -vE "(${ips_regexp})" | ipset -! restore
             fi
           fi
         fi
@@ -719,18 +822,26 @@ remove_geo_lock_file() {
 }
 
 get_status() {
-  echo -n "Статус Antiscan:"
+  printf "Версия Antiscan:\t${BOLD_TEXT}$ASCN_VERSION${NO_STYLE}\n"
+  printf "Статус:\t\t\t"
   if ascn_is_running; then
     if config_is_reloading; then
-      printf "\t${YELLOW_COLOR}обновление конфигурации${NO_STYLE}\n"
+      printf "${YELLOW_COLOR}обновление конфигурации${NO_STYLE}\n"
     elif geo_is_loading; then
-      printf "\t${YELLOW_COLOR}обновление списков подсетей геоблокировки${NO_STYLE}\n"
+      printf "${YELLOW_COLOR}обновление списков подсетей геоблокировки${NO_STYLE}\n"
     else
       banned_ip_count="$(ipset list ascn_ips | tail -n +8 | grep -c '^')"
       banned_subnets_count="$(ipset list ascn_subnets | tail -n +8 | grep -c '^')"
-      printf "\t${GREEN_COLOR}работает${NO_STYLE}\n"
-      printf "Заблокировано IP:\t${BOLD_TEXT}$banned_ip_count${NO_STYLE}\n"
+      printf "${GREEN_COLOR}работает${NO_STYLE}\n"
+      printf "Заблокировано адресов:\t${BOLD_TEXT}$banned_ip_count${NO_STYLE}\n"
       printf "Заблокировано подсетей:\t${BOLD_TEXT}$banned_subnets_count${NO_STYLE}\n"
+
+      if [ -n "$HONEYPOT_PORTS" ]; then
+        banned_ip_honeypot_count="$(ipset list ascn_honeypot | tail -n +8 | grep -c '^')"
+        printf "Заблокировано ловушкой:\t${BOLD_TEXT}$banned_ip_honeypot_count${NO_STYLE}\n"
+      else
+        printf "Блокировка ловушкой:\t${RED_COLOR}отключена${NO_STYLE}\n"
+      fi
 
       if [ "$READ_NDM_LOCKOUT_IPSETS" -eq 1 ]; then
         banned_ip_ndm_count="$(ipset list ascn_ndm_lockout | tail -n +8 | grep -c '^')"
@@ -800,7 +911,7 @@ get_status() {
       esac
     fi
   else
-    printf "\t${RED_COLOR}не запущен${NO_STYLE}\n"
+    printf "${RED_COLOR}не запущен${NO_STYLE}\n"
   fi
 }
 
@@ -816,13 +927,13 @@ get_ipset_member_text() {
 
 show_ipsets() {
   case "$1" in
-  ips | subnets | ndm_lockout)
+  ips | subnets | ndm_lockout | honeypot)
     if ascn_is_running; then
       if config_is_reloading; then
         print_message "error" "Просмотр данных недоступен во время обновления конфигурации Antiscan"
       else
-        text="IP"
-        text_1="IP"
+        text="адреса"
+        text_1="адресов"
         if [ "$1" == "subnets" ]; then
           text="подсети"
           text_1="подсетей"
@@ -842,7 +953,7 @@ show_ipsets() {
     fi
     ;;
   *)
-    echo "Использование: $0 list {ips|subnets|ndm_lockout}"
+    echo "Использование: $0 list {ips|subnets|ndm_lockout|honeypot}"
     ;;
   esac
 }
@@ -879,7 +990,7 @@ export_ipsets() {
         print_message "error" "Экспорт ipset в файл недоступен во время обновления конфигурации Antiscan"
         return 2
       else
-        local ipsets_list="ascn_candidates ascn_ips ascn_subnets ascn_ndm_lockout"
+        local ipsets_list="ascn_candidates ascn_ips ascn_subnets ascn_ndm_lockout ascn_honeypot"
         for set_name in $ipsets_list; do
           ipset_filename="$IPSETS_DIRECTORY/ipset_$set_name.txt"
           banned_count="$(ipset -q list $set_name | tail -n +8 | grep -c '^')"
@@ -955,6 +1066,8 @@ reload_config() {
       geo_countries_old="$GEOBLOCK_COUNTRIES"
       read_ndm_lockout_old="$READ_NDM_LOCKOUT_IPSETS"
       ndm_lockout_timeout_old="$LOCKOUT_IPSET_BANTIME"
+      honeypot_ports_old="$HONEYPOT_PORTS"
+      honeypot_timeout_old="$HONEYPOT_BANTIME"
 
       remove_rules
       destroy_temp_config
@@ -971,6 +1084,8 @@ reload_config() {
       reload_custom_ipset "$custom_lists_block_mode_old" "$CUSTOM_LISTS_BLOCK_MODE"
       reload_custom_exclude_ipset "$use_custom_exclude_list_old" "$USE_CUSTOM_EXCLUDE_LIST"
       reload_geo_ipset "$geoblock_mode_old" "$GEOBLOCK_MODE" "$geo_countries_old" "$GEOBLOCK_COUNTRIES"
+
+      reload_honeypot_ipset "$honeypot_ports_old" "$HONEYPOT_PORTS" "$honeypot_timeout_old" "$HONEYPOT_BANTIME"
 
       add_rules
       remove_lock_file
@@ -1036,9 +1151,28 @@ reload_lockout_ipset() {
   fi
 }
 
+reload_honeypot_ipset() {
+  old_hp_ports="$1"
+  new_hp_ports="$2"
+  old_hp_timeout="$3"
+  new_hp_timeout="$4"
+
+  [ -n "$old_hp_ports" ] && old_hp_state="1" || old_hp_state="0"
+  [ -n "$new_hp_ports" ] && new_hp_state="1" || new_hp_state="0"
+
+  if [ "$old_hp_state" != "$new_hp_state" ] || [ "$old_hp_timeout" != "$new_hp_timeout" ]; then
+    if [ "$old_hp_state" != "0" ]; then
+      [ -n "$(ipset -q list ascn_honeypot)" ] && ipset destroy ascn_honeypot
+    fi
+    if [ "$new_hp_state" != "0" ]; then
+      add_ipset "ascn_honeypot" "hash:ip" $HONEYPOT_BANTIME
+    fi
+  fi
+}
+
 flush_ipsets() {
   case "$1" in
-  "candidates" | "ips" | "subnets" | "custom_whitelist" | "custom_blacklist" | "custom_exclude" | "geo" | "ndm_lockout" | "")
+  "candidates" | "ips" | "subnets" | "custom_whitelist" | "custom_blacklist" | "custom_exclude" | "geo" | "ndm_lockout" | "honeypot" | "")
     if ascn_is_running; then
       if config_is_reloading; then
         print_message "error" "Очистка списков недоступна во время обновления конфигурации Antiscan"
@@ -1048,18 +1182,19 @@ flush_ipsets() {
         ipset_to_clear="$1"
         question_text=""
         if [ -z "$ipset_to_clear" ]; then
-          ipset_to_clear="candidates ips subnets geo_whitelist geo_blacklist ndm_lockout"
+          ipset_to_clear="candidates ips subnets geo_whitelist geo_blacklist ndm_lockout honeypot"
           question_text="Очистить все списки адресов? (Y/N): "
         else
           ipset_readable_name=""
           [ "$ipset_to_clear" == "candidates" ] && ipset_readable_name="список адресов-кандидатов на блокировку"
-          [ "$ipset_to_clear" == "ips" ] && ipset_readable_name="список заблокированных IP"
+          [ "$ipset_to_clear" == "ips" ] && ipset_readable_name="список заблокированных адресов"
           [ "$ipset_to_clear" == "subnets" ] && ipset_readable_name="список заблокированных подсетей"
           [ "$ipset_to_clear" == "custom_whitelist" ] && ipset_readable_name="пользовательский белый список адресов"
           [ "$ipset_to_clear" == "custom_blacklist" ] && ipset_readable_name="пользовательский черный список адресов"
           [ "$ipset_to_clear" == "custom_exclude" ] && ipset_readable_name="пользовательский список адресов-исключений"
           [ "$ipset_to_clear" == "geo" ] && ipset_to_clear="geo_whitelist geo_blacklist" && ipset_readable_name="список подсетей геоблокировки"
           [ "$ipset_to_clear" == "ndm_lockout" ] && ipset_readable_name="список заблокированных адресов NDMS"
+          [ "$ipset_to_clear" == "honeypot" ] && ipset_readable_name="список заблокированных ловушкой адресов"
           question_text="Очистить ${ipset_readable_name}? (Y/N): "
         fi
         if read -p "$question_text" confirm && [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]; then
@@ -1105,7 +1240,7 @@ flush_ipsets() {
     fi
     ;;
   *)
-    echo "Использование: $0 flush [candidates|ips|subnets|custom_whitelist|custom_blacklist|custom_exclude|geo|ndm_lockout]"
+    echo "Использование: $0 flush [candidates|ips|subnets|custom_whitelist|custom_blacklist|custom_exclude|geo|ndm_lockout|honeypot]"
     ;;
   esac
 }
@@ -1197,10 +1332,6 @@ retry_load_geo() {
   fi
 }
 
-show_version() {
-  opkg info antiscan | sed -n 's/^Version/Версия Antiscan/p'
-}
-
 case "$1" in
 start)
   start
@@ -1209,8 +1340,7 @@ stop)
   stop
   ;;
 restart)
-  export_ipsets
-  stop
+  stop 1
   start
   ;;
 status)
@@ -1247,7 +1377,10 @@ retry_load_geo)
   retry_load_geo
   ;;
 version)
-  show_version
+  echo "Версия Antiscan: $ASCN_VERSION"
+  ;;
+version_opkg)
+  opkg info antiscan | sed -n 's/^Version/Версия Antiscan (OPKG)/p'
   ;;
 *)
   echo "Использование: $0 {start|stop|restart|status|list|reload|flush|version|update_rules|read_candidates|read_ndm_ipsets|save_ipsets|update_ipsets|update_crontab}"
