@@ -54,7 +54,6 @@ if [ -z "$API_RESPONSE" ]; then
 else
   PACKAGE_URL="$(echo "$API_RESPONSE" | grep 'browser_download_url' | grep '\.ipk' | cut -d '"' -f4)"
   PACKAGE_VERSION="$(echo "$API_RESPONSE" | grep 'tag_name' | cut -d '"' -f4)"
-
   if [ -z "$PACKAGE_URL" ]; then
     print_message "error" "Не удалось найти файл пакета Antiscan"
     exit 1
@@ -67,7 +66,7 @@ fi
 PACKAGE_FILE="$(basename "$PACKAGE_URL")"
 PACKAGE_PATH="/tmp/$PACKAGE_FILE"
 print_message "notice" "Загрузка $PACKAGE_URL ..."
-if curl -# -o "$PACKAGE_PATH" "$PACKAGE_URL"; then
+if curl -# -L -o "$PACKAGE_PATH" "$PACKAGE_URL"; then
   print_message "success" "Файл пакета Antiscan успешно загружен"
 else
   print_message "error" "Не удалось загрузить файл пакета Antiscan"
