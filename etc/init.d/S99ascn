@@ -12,23 +12,28 @@ ASCN_TEMP_FILE="/tmp/ascn.run"
 ASCN_LOCK_FILE="/tmp/ascn.lock"
 ASCN_GEO_LOCK_FILE="/tmp/ascn_geo.lock"
 ASCN_GEO_LOAD_ERROR_FILE="/tmp/ascn_geo_load_error"
-ASCN_VERSION="1.8"
+ASCN_VERSION="1.8.1"
 
 PATH=/opt/bin:/opt/sbin:/sbin:/usr/sbin:/bin:/usr/bin
 
 print_message() {
   msg_type="$1"
   msg_text="$2"
-  logger -p "${msg_type}" -t "Antiscan" "${msg_text}"
+  if [ "$msg_type" != "console" ]; then
+    logger -p "${msg_type}" -t "Antiscan" "${msg_text}"
+  fi
   case $msg_type in
   error)
-    echo "${msg_text}" >&2
+    printf "${RED_COLOR}${msg_text}${NO_STYLE}\n" >&2
     ;;
   notice)
-    [ -z "$3" ] && echo "${msg_text}"
+    [ -z "$3" ] && printf "${BOLD_TEXT}${msg_text}${NO_STYLE}\n"
     ;;
   warning)
-    [ "$3" == "1" ] && echo "${msg_text}" >&2
+    [ "$3" == "1" ] && printf "${YELLOW_COLOR}${msg_text}${NO_STYLE}\n" >&2
+    ;;
+  console)
+    printf "${BOLD_TEXT}${msg_text}${NO_STYLE}\n"
     ;;
   esac
 }
@@ -183,11 +188,11 @@ start() {
       exit 2
     fi
 
+    update_cron
     load_kernel_modules
     write_temp_config
     create_ipsets
     add_rules
-    update_cron
     create_status_file
     print_message "notice" "Antiscan запущен"
   fi
@@ -941,11 +946,11 @@ show_ipsets() {
         ipset_data="$(ipset -q list ascn_$1 -s | tail -n +8)"
         [ -z "$ipset_data" ] && banned_count=0 || banned_count="$(echo "$ipset_data" | grep -c '^')"
         if [ "$banned_count" -eq 0 ]; then
-          echo "Заблокированные ${text} отсутствуют"
+          print_message "console" "Заблокированные ${text} отсутствуют"
         else
-          echo "Заблокированные ${text}:"
+          print_message "console" "Заблокированные ${text}:"
           echo "$ipset_data"
-          printf "Заблокировано ${text_1}: ${BOLD_TEXT}${banned_count}${NO_STYLE}\n"
+          print_message "console" "Заблокировано ${text_1}: ${banned_count}"
         fi
       fi
     else
@@ -953,7 +958,7 @@ show_ipsets() {
     fi
     ;;
   *)
-    echo "Использование: $0 list {ips|subnets|ndm_lockout|honeypot}"
+    print_message "console" "Использование: $0 list {ips|subnets|ndm_lockout|honeypot}"
     ;;
   esac
 }
@@ -1240,7 +1245,7 @@ flush_ipsets() {
     fi
     ;;
   *)
-    echo "Использование: $0 flush [candidates|ips|subnets|custom_whitelist|custom_blacklist|custom_exclude|geo|ndm_lockout|honeypot]"
+    print_message "console" "Использование: $0 flush [candidates|ips|subnets|custom_whitelist|custom_blacklist|custom_exclude|geo|ndm_lockout|honeypot]"
     ;;
   esac
 }
@@ -1284,7 +1289,7 @@ update_ipsets() {
     fi
     ;;
   *)
-    echo "Использование: $0 update_ipsets {custom|geo}"
+    print_message "console" "Использование: $0 update_ipsets {custom|geo}"
     ;;
   esac
 }
@@ -1294,14 +1299,20 @@ update_cron() {
   if [ -f "$crontab_bin" ]; then
     ascn_cron_file="$ANTISCAN_DIR/ascn_crontab.conf"
     if [ -s "$ascn_cron_file" ]; then
-      tasks_from_crontab="$(crontab -l | grep 'S99ascn')"
-      tasks_from_file="$(grep 'S99ascn' $ascn_cron_file)"
-      if [ "$tasks_from_crontab" != "$tasks_from_file" ]; then
-        print_message "notice" "Обновляем crontab"
-        crontab -l | sed '/S99ascn/d' >"/tmp/crontasks"
-        echo "$tasks_from_file" >>"/tmp/crontasks"
-        crontab "/tmp/crontasks"
-        rm "/tmp/crontasks"
+      if [ ! -d "/opt/var/spool/cron/crontabs" ]; then
+        print_message "error" "При чтении списка задач crontab что-то пошло не так. У вас не настроен cron?"
+      else
+        tasks_from_crontab="$(crontab -l | grep 'S99ascn')"
+        tasks_from_file="$(grep 'S99ascn' "$ascn_cron_file")"
+        if [ "$tasks_from_crontab" != "$tasks_from_file" ]; then
+          print_message "notice" "Обновляем crontab"
+          crontab -l | sed '/S99ascn/d; /# DO/d; /# (/d' >"/tmp/crontasks"
+          echo "$tasks_from_file" >>"/tmp/crontasks"
+          if ! crontab "/tmp/crontasks"; then
+            print_message "error" "При обновлении crontab что-то пошло не так :("
+          fi
+          rm "/tmp/crontasks"
+        fi
       fi
     else
       print_message "error" "Невозможно обновить crontab! Файл ascn_crontab.conf пуст."
@@ -1377,12 +1388,17 @@ retry_load_geo)
   retry_load_geo
   ;;
 version)
-  echo "Версия Antiscan: $ASCN_VERSION"
+  print_message "console" "Версия Antiscan: $ASCN_VERSION"
   ;;
 version_opkg)
-  opkg info antiscan | sed -n 's/^Version/Версия Antiscan (OPKG)/p'
+  ascn_opkg_version="$(opkg list-installed antiscan | awk '{print $3}')"
+  if [ -z "$ascn_opkg_version" ]; then
+    print_message "console" "Не удалось определить версию пакета Antiscan"
+  else
+    print_message "console" "Версия Antiscan (OPKG): $ascn_opkg_version"
+  fi
   ;;
 *)
-  echo "Использование: $0 {start|stop|restart|status|list|reload|flush|version|update_rules|read_candidates|read_ndm_ipsets|save_ipsets|update_ipsets|update_crontab}"
+  print_message "console" "Использование: $0 {start|stop|restart|status|list|reload|flush|version|update_rules|read_candidates|read_ndm_ipsets|save_ipsets|update_ipsets|update_crontab}"
   ;;
 esac

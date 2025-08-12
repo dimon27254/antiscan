@@ -17,17 +17,12 @@
 
 ### Требования для корректной работы скрипта:
 1. Установленный компонент "Модули ядра для подсистемы Netfilter" (начиная с версии ПО 4.3 доступен без "Протокол IPv6").
-2. Предварительно настроенный и готовый к работе cron. Можно воспользоваться простой и понятной инструкцией: https://web.archive.org/web/20231004003915/https://forums.zyxmon.org/viewtopic.php?f=5&t=5257
 
 ### Установка:
-1. **Офлайн вариант:**
-	- Скачать пакет и загрузить на устройство/внешний накопитель
-	- Выполнить команду `opkg install "/путь_к_пакету/antiscan_1.8_all.ipk"`
-2. **Онлайн вариант:**
-	- Выполнить команду `opkg update && opkg install wget-ssl ca-bundle && opkg install https://github.com/dimon27254/antiscan/releases/download/1.8/antiscan_1.8_all.ipk`
-3. Указать unix-имена интерфейсов интернет-подключений в файле `"/opt/etc/antiscan/ascn.conf"`. В ПО версии 4.3 и выше просмотр unix-имен интерфейсов доступен по команде `show interface {интерфейс} system-name`
-4. Настроить остальные параметры под собственные нужды, если это требуется, в файле `"/opt/etc/antiscan/ascn.conf"`
-5. Запустить Antiscan командой `antiscan start`
+1. Выполнить команду `opkg update && opkg install curl && curl -fsSL https://raw.githubusercontent.com/dimon27254/antiscan/refs/heads/main/install.sh | sh`
+2. Указать unix-имена интерфейсов интернет-подключений в файле `"/opt/etc/antiscan/ascn.conf"`. В ПО версии 4.3 и выше просмотр unix-имен интерфейсов доступен по команде `show interface {интерфейс} system-name`
+3. Настроить остальные параметры под собственные нужды, если это требуется, в файле `"/opt/etc/antiscan/ascn.conf"`
+4. Запустить Antiscan командой `antiscan start`
 
 **Для версий Antiscan 1.4 и выше доступна настройка с помощью [web4static](https://github.com/spatiumstas/web4static) от [spatiumstas](https://github.com/spatiumstas).**
 
