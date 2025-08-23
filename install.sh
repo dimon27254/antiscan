@@ -78,9 +78,8 @@ if opkg update && opkg install wget-ssl ca-bundle; then
     else
       print_message "notice" "Cron найден. Переходим к установке Antiscan..."
     fi
-
-    print_message "notice" "Установка Antiscan..."
-    if opkg update && opkg install antiscan --force-reinstall; then
+    
+    if opkg install antiscan --force-reinstall; then
       if [ -z "$antiscan_string" ]; then
         print_message "success" "Antiscan успешно установлен!"
         print_message "notice" "Выполните настройку в ascn.conf и запустите Antiscan."
@@ -97,5 +96,3 @@ if opkg update && opkg install wget-ssl ca-bundle; then
 else
   print_message "error" "При установке wget-ssl и ca-bundle что-то пошло не так"
 fi
-
-rm -f "$PACKAGE_PATH"
