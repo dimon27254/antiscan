@@ -1,0 +1,125 @@
+name: Build and publish
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build-package:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build package
+        run: make package
+
+      - name: Upload files
+        uses: actions/upload-artifact@v4
+        with:
+          name: package
+          path: ./out/antiscan_*_all.ipk
+          if-no-files-found: error
+
+      - name: Summary
+        run: |
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          ls ./out/antiscan_*_all.ipk >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+  create-release:
+    runs-on: ubuntu-22.04
+    needs: [build-package]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Read version
+        id: version
+        run: |
+          version=$(sed -n 's/^ASCN_VERSION="\([^"]*\)"$/\1/p' etc/init.d/S99ascn)
+          echo "content=$version" >> $GITHUB_OUTPUT
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: out
+
+      - name: Display artifacts
+        run: ls -R ./out
+
+      - name: Create tag
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git tag -a ${{ steps.version.outputs.content }} -m "Release ${{ steps.version.outputs.content }}"
+          git push origin ${{ steps.version.outputs.content }}
+          git push
+
+      - name: Create and upload release
+        uses: softprops/action-gh-release@v2.3.2
+        with:
+          tag_name: ${{ steps.version.outputs.content }}
+          make_latest: true
+          files: ./out/package/antiscan_${{ steps.version.outputs.content }}_all.ipk
+
+      - name: Summary
+        run: |
+          echo "Release ${{ steps.version.outputs.content }} created" >> $GITHUB_STEP_SUMMARY
+
+  build-repository:
+    runs-on: ubuntu-22.04
+    needs: [build-package]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+
+      - name: Display artifacts
+        run: ls ./out
+
+      - name: Build repository
+        run: make repository
+
+      - name: Upload pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./out/_pages
+
+      - name: Summary
+        run: |
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          ls -R ./out/_pages >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+  deploy-repository:
+    runs-on: ubuntu-22.04
+    needs: [build-repository]
+
+    steps:
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Summary
+        run: |
+          echo "Repository deployed" >> $GITHUB_STEP_SUMMARY
