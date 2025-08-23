@@ -116,7 +116,7 @@ LOCKOUT_IPSET_BANTIME=864000
 
 ### Использование Antiscan:
 ```
-{start|stop|restart|status|list|reload|flush|version|update_rules|read_candidates|read_ndm_ipsets|save_ipsets|update_ipsets|update_crontab}
+{start|stop|restart|status|list|reload|flush|version|edit|update_rules|read_candidates|read_ndm_ipsets|save_ipsets|update_ipsets|update_crontab}
 start                            начать работу скрипта (создать правила, ipset'ы, начать сбор IP)
 stop                             остановить работу скрипта (удалить правила, очистить ipset'ы, отменить блокировку)
 restart                          остановить и заново начать работу скрипта
@@ -131,6 +131,10 @@ flush [candidates|ips|subnets|custom_whitelist|custom_blacklist|custom_exclude|g
                                  очистить списки адресов и удалить их файлы
 
 version                          отобразить версию установленного Antiscan
+
+edit {config|crontab|custom_exclude|custom_blacklist|custom_whitelist}
+                                 редактировать конфигурационные файлы Antiscan или пользовательские списки
+
 update_rules                     проверить наличие правил iptables, и добавить их при отсутствии (для hook-скрипта netfilter.d)
 read_candidates                  обработать список адресов кандидатов для блокировки по подсетям (запускается вручную или по расписанию)
 read_ndm_ipsets                  считать системные списки блокировки по ip lockout-policy (запускается вручную или по расписанию)
