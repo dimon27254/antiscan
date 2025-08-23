@@ -7,7 +7,6 @@ GREEN_COLOR="\033[1;32m"
 BOLD_TEXT="\033[1m"
 NO_STYLE="\033[0m"
 CRONTABS_DIR="/opt/var/spool/cron/crontabs"
-API_URL="https://api.github.com/repos/dimon27254/antiscan/releases/latest"
 antiscan_string="$(opkg list-installed antiscan)"
 
 print_message() {
@@ -45,72 +44,58 @@ cron_installed() {
   fi
 }
 
-print_message "notice" "Запрашиваем данные с GitHub..."
-
-API_RESPONSE="$(curl -fsSL "$API_URL")"
-if [ -z "$API_RESPONSE" ]; then
-  print_message "error" "Не удалось получить данные"
-  exit 1
-else
-  PACKAGE_URL="$(echo "$API_RESPONSE" | grep 'browser_download_url' | grep '\.ipk' | cut -d '"' -f4)"
-  PACKAGE_VERSION="$(echo "$API_RESPONSE" | grep 'tag_name' | cut -d '"' -f4)"
-  if [ -z "$PACKAGE_URL" ]; then
-    print_message "error" "Не удалось найти файл пакета Antiscan"
-    exit 1
-  else
-    print_message "success" "Данные успешно получены"
-    print_message "notice" "Актуальная версия Antiscan: $PACKAGE_VERSION"
-  fi
-fi
-
-PACKAGE_FILE="$(basename "$PACKAGE_URL")"
-PACKAGE_PATH="/tmp/$PACKAGE_FILE"
-print_message "notice" "Загрузка $PACKAGE_URL ..."
-if curl -# -L -o "$PACKAGE_PATH" "$PACKAGE_URL"; then
-  print_message "success" "Файл пакета Antiscan успешно загружен"
-else
-  print_message "error" "Не удалось загрузить файл пакета Antiscan"
-  exit 1
-fi
-
-print_message "notice" "Проверяем наличие cron..."
-if ! cron_installed; then
-  print_message "notice" "Cron не найден. Устанавливаем..."
-  if opkg update && opkg install cron; then
-    print_message "success" "Cron успешно установлен"
-    print_message "notice" "Настраиваем cron..."
-    if [ ! -d "$CRONTABS_DIR" ]; then
-      mkdir -p "$CRONTABS_DIR"
-    fi
-    if ! crontab -l >/dev/null 2>&1; then
-      echo | crontab -
-    fi
-    sed -i 's/="-s"/=""/' "/opt/etc/init.d/S10cron"
-    if "/opt/etc/init.d/S10cron" start; then
-      print_message "success" "Cron готов к работе"
-      print_message "notice" "Переходим к установке Antiscan..."
+print_message "notice" "Устанавливаем пакеты для доступа к репозиторию Antiscan..."
+if opkg update && opkg install wget-ssl ca-bundle; then
+  print_message "success" "wget-ssl и ca-bundle успешно установлены"
+  print_message "notice" "Добавляем репозиторий Antiscan..."
+  mkdir -p /opt/etc/opkg
+  echo "src/gz antiscan https://dimon27254.github.io/antiscan/all" >"/opt/etc/opkg/antiscan.conf"
+  if opkg update; then
+    print_message "notice" "Проверяем наличие cron..."
+    if ! cron_installed; then
+      print_message "notice" "Cron не найден. Устанавливаем..."
+      if opkg install cron; then
+        print_message "success" "Cron успешно установлен"
+        print_message "notice" "Настраиваем cron..."
+        if [ ! -d "$CRONTABS_DIR" ]; then
+          mkdir -p "$CRONTABS_DIR"
+        fi
+        if ! crontab -l >/dev/null 2>&1; then
+          echo | crontab -
+        fi
+        sed -i 's/="-s"/=""/' "/opt/etc/init.d/S10cron"
+        if "/opt/etc/init.d/S10cron" start; then
+          print_message "success" "Cron готов к работе"
+          print_message "notice" "Переходим к установке Antiscan..."
+        else
+          print_message "error" "Не удалось запустить cron"
+          return 1
+        fi
+      else
+        print_message "error" "Не удалось установить cron"
+        return 1
+      fi
     else
-      print_message "error" "Не удалось запустить cron"
-      exit 1
+      print_message "notice" "Cron найден. Переходим к установке Antiscan..."
+    fi
+
+    print_message "notice" "Установка Antiscan..."
+    if opkg update && opkg install antiscan --force-reinstall; then
+      if [ -z "$antiscan_string" ]; then
+        print_message "success" "Antiscan успешно установлен!"
+        print_message "notice" "Выполните настройку в ascn.conf и запустите Antiscan."
+      else
+        print_message "success" "Antiscan успешно обновлен!"
+        print_message "notice" "Не забудьте его запустить."
+      fi
+    else
+      print_message "error" "Не удалось установить Antiscan"
     fi
   else
-    print_message "error" "Не удалось установить cron"
-    exit 1
+    print_message "error" "Не обновить список пакетов"
   fi
 else
-  print_message "notice" "Cron найден. Переходим к установке Antiscan..."
+  print_message "error" "При установке wget-ssl и ca-bundle что-то пошло не так"
 fi
 
-print_message "notice" "Установка $PACKAGE_FILE ..."
-if opkg install "$PACKAGE_PATH" --force-reinstall; then
-  if [ -z "$antiscan_string" ]; then
-    print_message "success" "Antiscan успешно установлен!"
-    print_message "notice" "Выполните настройку в ascn.conf и запустите Antiscan."
-  else
-    print_message "success" "Antiscan успешно обновлен!"
-    print_message "notice" "Не забудьте его запустить."
-  fi
-else
-  print_message "error" "Не удалось установить Antiscan"
-fi
 rm -f "$PACKAGE_PATH"
