@@ -8,6 +8,7 @@ BOLD_TEXT="\033[1m"
 NO_STYLE="\033[0m"
 CRONTABS_DIR="/opt/var/spool/cron/crontabs"
 antiscan_string="$(opkg list-installed antiscan)"
+REPO_URL="https://dimon27254.github.io/antiscan/all"
 
 print_message() {
   msg_type="$1"
@@ -49,7 +50,7 @@ if opkg update && opkg install wget-ssl ca-bundle; then
   print_message "success" "wget-ssl и ca-bundle успешно установлены"
   print_message "notice" "Добавляем репозиторий Antiscan..."
   mkdir -p /opt/etc/opkg
-  echo "src/gz antiscan https://dimon27254.github.io/antiscan/all" >"/opt/etc/opkg/antiscan.conf"
+  echo "src/gz antiscan ${REPO_URL}" >"/opt/etc/opkg/antiscan.conf"
   if opkg update; then
     print_message "notice" "Проверяем наличие cron..."
     if ! cron_installed; then
@@ -78,7 +79,7 @@ if opkg update && opkg install wget-ssl ca-bundle; then
     else
       print_message "notice" "Cron найден. Переходим к установке Antiscan..."
     fi
-    
+
     if opkg install antiscan --force-reinstall; then
       if [ -z "$antiscan_string" ]; then
         print_message "success" "Antiscan успешно установлен!"

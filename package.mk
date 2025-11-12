@@ -14,7 +14,7 @@ _control:
 	echo "Section: net" >> out/$(BUILD_DIR)/control/control
 	echo "URL: https://github.com/dimon27254/antiscan" >> out/$(BUILD_DIR)/control/control
 	echo "Architecture: all" >> out/$(BUILD_DIR)/control/control
-	echo "Description:  Antiscan utility" >> out/$(BUILD_DIR)/control/control
+	echo "Description: Antiscan utility" >> out/$(BUILD_DIR)/control/control
 	echo "" >> out/$(BUILD_DIR)/control/control
 
 _scripts:
@@ -51,6 +51,7 @@ _ipk:
 	make _startup
 	
 	cp -r etc/antiscan out/$(BUILD_DIR)/data/opt/etc/antiscan
+	chmod +x -R out/$(BUILD_DIR)/data/opt/etc/antiscan/scripts
 	
 	make _hook
 
