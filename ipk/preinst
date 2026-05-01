@@ -106,9 +106,15 @@ if [ -s "$CONFIG_FILE" ]; then
 fi
 if [ -s "$CRONTAB_FILE" ]; then
     read_ndm_task_str="$(grep 'read_ndm_ipsets' "$CRONTAB_FILE")"
+    update_geo_task_str="$(grep 'update_ipsets geo' "$CRONTAB_FILE")"
     if [ -z "$read_ndm_task_str" ]; then
         printf "\n*/2 * * * * /opt/etc/init.d/S99ascn read_ndm_ipsets &\n" >>"$CRONTAB_FILE"
         sed -n -i '\:S99ascn:p' "$CRONTAB_FILE"
         printf "В имеющийся ascn_crontab.conf добавлена задача для чтения списков NDM ip lockout-policy\n"
+    fi
+    if [ -z "$update_geo_task_str" ]; then
+        printf "\n0 5 */15 * * /opt/etc/init.d/S99ascn update_ipsets geo &\n" >>"$CRONTAB_FILE"
+        sed -n -i '\:S99ascn:p' "$CRONTAB_FILE"
+        printf "В имеющийся ascn_crontab.conf добавлена задача для обновления списков подсетей стран\n"
     fi
 fi

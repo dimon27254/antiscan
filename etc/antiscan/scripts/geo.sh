@@ -9,7 +9,7 @@ download_geo_subnets() {
   local countries="$3"
   local all_countries_list=""
 
-  local SUBNETS_MIRROR="https://antiscan.ru/data/geo"
+  local SUBNETS_MIRROR="https://antiscan.ru/data/geo/v1"
 
   if [ "$GEOBLOCK_MODE" == "blacklist" ] || [ "$GEOBLOCK_MODE" == "whitelist" ]; then
     all_countries_list="${GEOBLOCK_COUNTRIES}"

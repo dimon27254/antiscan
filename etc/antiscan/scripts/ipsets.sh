@@ -122,7 +122,7 @@ load_custom_ipset() {
         local custom_file_size="$(ls -l "$custom_ipset_filename" | awk '{print $5}')"
         if [ "$custom_file_size" -gt 4 ]; then
             echo "create $1 hash:net family inet hashsize 1024 maxelem 65536" >"$custom_ipset_tempfile"
-            sed "s/^/add $1 /" "$custom_ipset_filename" >>"$custom_ipset_tempfile"
+            sed -nE "s/^([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}(\/[0-9]{1,2})?).*/add $1 \1/p" "$custom_ipset_filename" >>"$custom_ipset_tempfile"
             if ! ipset -! restore <"$custom_ipset_tempfile"; then
                 print_message "error" "Не удалось импортировать список $1!"
             fi
@@ -146,7 +146,15 @@ export_ipsets() {
                 return 2
             else
                 local ipsets_list=""
-                [ -z "$1" ] && ipsets_list="ascn_candidates ascn_ips ascn_subnets ascn_ndm_lockout ascn_honeypot" || ipsets_list="ascn_candidates ascn_ips ascn_subnets"
+                if [ -z "$1" ]; then
+                    ipsets_list="ascn_candidates ascn_ips ascn_subnets ascn_ndm_lockout ascn_honeypot"
+                elif [ "$1" == "1" ]; then
+                    ipsets_list="ascn_ips ascn_candidates ascn_subnets"
+                elif [ "$1" == "2" ]; then
+                    ipsets_list="ascn_ndm_lockout"
+                else
+                    ipsets_list="ascn_honeypot"
+                fi
                 for set_name in $ipsets_list; do
                     local ipset_filename="$IPSETS_DIRECTORY/ipset_$set_name.txt"
                     local banned_count="$(ipset -q list $set_name | tail -n +8 | grep -c '^')"
@@ -222,34 +230,32 @@ reload_custom_exclude_ipset() {
     fi
 }
 
-reload_lockout_ipset() {
-    local old_lockout_state="$1"
-    local new_lockout_state="$2"
-    local old_lockout_timeout="$3"
-    local new_lockout_timeout="$4"
+reload_ipset() {
+    local set_name="$1"
+    local old_state="$2"
+    local new_state="$3"
+    local old_timeout="$4"
+    local new_timeout="$5"
 
-    if [ "$old_lockout_state" != "$new_lockout_state" ] || [ "$old_lockout_timeout" != "$new_lockout_timeout" ]; then
-        if [ "$old_lockout_state" != "0" ]; then
-            [ -n "$(ipset -q -n list ascn_ndm_lockout)" ] && ipset destroy ascn_ndm_lockout
-        fi
-        if [ "$new_lockout_state" != "0" ]; then
-            add_ipset "ascn_ndm_lockout" "hash:ip" $LOCKOUT_IPSET_BANTIME
-        fi
-    fi
-}
+    if [ "$old_state" == "1" ] && [ "$new_state" == "1" ]; then
+        update_ipset_timeout "$set_name" "$old_timeout" "$new_timeout" "" 1
+    else
+        if [ "$old_state" == "0" ] && [ "$new_state" == "1" ]; then
 
-reload_honeypot_ipset() {
-    local old_hp_state="$1"
-    local new_hp_state="$2"
-    local old_hp_timeout="$3"
-    local new_hp_timeout="$4"
+            add_ipset "$set_name" "hash:ip" "$new_timeout"
 
-    if [ "$old_hp_state" != "$new_hp_state" ] || [ "$old_hp_timeout" != "$new_hp_timeout" ]; then
-        if [ "$old_hp_state" != "0" ]; then
-            [ -n "$(ipset -q -n list ascn_honeypot)" ] && ipset destroy ascn_honeypot
-        fi
-        if [ "$new_hp_state" != "0" ]; then
-            add_ipset "ascn_honeypot" "hash:ip" $HONEYPOT_BANTIME
+        elif [ "$old_state" == "1" ] && [ "$new_state" == "0" ]; then
+
+            case "$set_name" in
+            "ascn_ndm_lockout")
+                export_ipsets 2
+                ;;
+            "ascn_honeypot")
+                export_ipsets 3
+                ;;
+            esac
+
+            [ -n "$(ipset -q -n list $set_name)" ] && ipset destroy "$set_name"
         fi
     fi
 }

@@ -32,6 +32,15 @@ check_config() {
   if [ -z "$ISP_INTERFACES" ]; then
     print_message "error" "В ascn.conf не указаны интерфейсы!"
     exit 3
+  else
+    local count=$(
+      set -- $ISP_INTERFACES
+      echo $#
+    )
+    if [ "$count" -gt 10 ]; then
+      print_message "error" "Количество интерфейсов превышает 10"
+      exit 4
+    fi
   fi
 
   [ -z "$ENABLE_IPS_BAN" ] && ENABLE_IPS_BAN=1
@@ -44,51 +53,100 @@ check_config() {
     local ports_count=0
     local ports_forwarded_count=0
     local ports_honeypot_count=0
-    local need_to_exit=0
     if [ -n "$PORTS" ]; then
-      ports_count=$(
-        set -- $(echo "$PORTS" | tr ',:' ' ')
-        echo $#
-      )
+      if echo "$PORTS" | grep -Eq '^[0-9]+(:[0-9]+)?(,[0-9]+(:[0-9]+)?)*$'; then
+        ports_count=$(
+          set -- $(echo "$PORTS" | tr ',:' ' ')
+          echo $#
+        )
+      else
+        print_message "error" "Список портов содержит недопустимые символы"
+        exit 3
+      fi
     fi
     if [ -n "$PORTS_FORWARDED" ]; then
-      ports_forwarded_count=$(
-        set -- $(echo "$PORTS_FORWARDED" | tr ',:' ' ')
-        echo $#
-      )
+      if echo "$PORTS_FORWARDED" | grep -Eq '^[0-9]+(:[0-9]+)?(,[0-9]+(:[0-9]+)?)*$'; then
+        ports_forwarded_count=$(
+          set -- $(echo "$PORTS_FORWARDED" | tr ',:' ' ')
+          echo $#
+        )
+      else
+        print_message "error" "Список переадресованных портов содержит недопустимые символы"
+        exit 3
+      fi
     fi
-    if [ "$ENABLE_HONEYPOT" == "1" ] && [ -n "$HONEYPOT_PORTS" ]; then
-      ports_honeypot_count=$(
-        set -- $(echo "$HONEYPOT_PORTS" | tr ',:' ' ')
-        echo $#
-      )
+    if [ "$ENABLE_HONEYPOT" == "1" ]; then
+      if [ -n "$HONEYPOT_PORTS" ]; then
+        if echo "$HONEYPOT_PORTS" | grep -Eq '^[0-9]+(:[0-9]+)?(,[0-9]+(:[0-9]+)?)*$'; then
+          ports_honeypot_count=$(
+            set -- $(echo "$HONEYPOT_PORTS" | tr ',:' ' ')
+            echo $#
+          )
+        else
+          print_message "error" "Список портов для ловушки содержит недопустимые символы"
+          exit 3
+        fi
+      else
+        print_message "error" "В ascn.conf не указаны порты для ловушки"
+        exit 4
+      fi
     fi
     if [ "$ports_count" -gt 15 ]; then
       print_message "error" "Количество указанных портов превышает 15"
-      need_to_exit=1
+      exit 4
     fi
     if [ "$ports_forwarded_count" -gt 15 ]; then
       print_message "error" "Количество указанных переадресованных портов превышает 15"
-      need_to_exit=1
+      exit 4
     fi
     if [ "$ports_honeypot_count" -gt 15 ]; then
       print_message "error" "Количество указанных портов для ловушки превышает 15"
-      need_to_exit=1
+      exit 4
     fi
-    [ "$need_to_exit" -eq 1 ] && exit 4
   fi
 
   if [ "$ENABLE_IPS_BAN" == "1" ]; then
-    if [ -z "$RECENT_CONNECTIONS_TIME" ] || [ -z "$RECENT_CONNECTIONS_HITCOUNT" ] || [ -z "$RECENT_CONNECTIONS_LIMIT" ] ||
-      [ -z "$DIFFERENT_IP_THRESHOLD" ] || [ -z "$RECENT_CONNECTIONS_BANTIME" ] || [ -z "$DIFFERENT_IP_CANDIDATES_STORAGETIME" ] || [ -z "$SUBNETS_BANTIME" ]; then
-      print_message "error" "В ascn.conf не указаны параметры работы Antiscan!"
+    if [ -z "$RECENT_CONNECTIONS_TIME" ] || [ -z "$RECENT_CONNECTIONS_HITCOUNT" ] || [ -z "$RECENT_CONNECTIONS_LIMIT" ] || [ -z "$RECENT_CONNECTIONS_BANTIME" ]; then
+      print_message "error" "В ascn.conf не указаны параметры блокировки по IP!"
       exit 3
     fi
-    [ -z "$RULES_MASK" ] && RULES_MASK="255.255.255.255"
-    if [ "$RECENT_CONNECTIONS_BANTIME" -gt 2147483 ] || [ "$DIFFERENT_IP_CANDIDATES_STORAGETIME" -gt 2147483 ] || [ "$SUBNETS_BANTIME" -gt 2147483 ]; then
+
+    if [[ "$RECENT_CONNECTIONS_TIME" -lt 2 || "$RECENT_CONNECTIONS_TIME" -gt 3600 ]]; then
+      print_message "error" "Время наблюдения за новыми соединениями должно находиться в диапазоне от 2 до 3600"
+      exit 4
+    fi
+
+    if [[ "$RECENT_CONNECTIONS_HITCOUNT" -lt 2 || "$RECENT_CONNECTIONS_HITCOUNT" -gt 100 ]]; then
+      print_message "error" "Пороговое значение новых соединений должно находиться в диапазоне от 2 до 100"
+      exit 4
+    fi
+
+    if [[ "$RECENT_CONNECTIONS_LIMIT" -lt 3 || "$RECENT_CONNECTIONS_LIMIT" -gt 1000 ]]; then
+      print_message "error" "Значение лимита множественных соединений должно находиться в диапазоне от 3 до 1000"
+      exit 4
+    fi
+
+    if [ "$RECENT_CONNECTIONS_BANTIME" -gt 2147483 ]; then
+      print_message "error" "Срок хранения записей в списке блокировки по IP не может превышать 2147483 секунды"
+      exit 4
+    fi
+
+    if [ -z "$DIFFERENT_IP_THRESHOLD" ] || [ -z "$DIFFERENT_IP_CANDIDATES_STORAGETIME" ] || [ -z "$SUBNETS_BANTIME" ]; then
+      print_message "error" "В ascn.conf не указаны параметры блокировки по подсетям!"
+      exit 3
+    fi
+
+    if [[ "$DIFFERENT_IP_THRESHOLD" -lt 2 || "$DIFFERENT_IP_THRESHOLD" -gt 254 ]]; then
+      print_message "error" "Значение порогового количества IP должно находиться в диапазоне от 2 до 254"
+      exit 4
+    fi
+
+    if [ "$DIFFERENT_IP_CANDIDATES_STORAGETIME" -gt 2147483 ] || [ "$SUBNETS_BANTIME" -gt 2147483 ]; then
       print_message "error" "Срок хранения записей в списках не может превышать 2147483 секунды"
       exit 4
     fi
+
+    [ -z "$RULES_MASK" ] && RULES_MASK="255.255.255.255"
   fi
 
   [ -z "$SAVE_IPSETS" ] && SAVE_IPSETS=0
@@ -97,7 +155,7 @@ check_config() {
   [ -z "$LOCKOUT_IPSET_BANTIME" ] && LOCKOUT_IPSET_BANTIME=0
   [ -z "$HONEYPOT_BANTIME" ] && HONEYPOT_BANTIME=0
 
-  if [ "$LOCKOUT_IPSET_BANTIME" -gt 2147483 ] || [[ "$ENABLE_HONEYPOT" == "1" && "$HONEYPOT_BANTIME" -gt 2147483 ]]; then
+  if [ "$LOCKOUT_IPSET_BANTIME" -gt 2147483 ] || [[ "$HONEYPOT_BANTIME" -gt 2147483 ]]; then
     print_message "error" "Срок хранения записей в списках не может превышать 2147483 секунды"
     exit 4
   fi
@@ -133,9 +191,7 @@ check_config() {
   if [ -z "$GEO_EXCLUDE_COUNTRIES" ]; then
     GEO_EXCLUDE_COUNTRIES=""
   else
-    echo "$GEO_EXCLUDE_COUNTRIES" | grep -Eq '^([A-Z]{2})( +[A-Z]{2} {0,})*$'
-    local validation_result=$?
-    if [ "$validation_result" -eq 0 ]; then
+    if echo "$GEO_EXCLUDE_COUNTRIES" | grep -Eq '^([A-Z]{2})( +[A-Z]{2} *)*$'; then
       local count=$(
         set -- $GEO_EXCLUDE_COUNTRIES
         echo $#
@@ -159,9 +215,7 @@ check_config() {
         print_message "error" "В ascn.conf не указаны страны для геоблокировки!"
         exit 3
       else
-        echo "$GEOBLOCK_COUNTRIES" | grep -Eq '^([A-Z]{2})( +[A-Z]{2} {0,})*$'
-        local validation_result=$?
-        if [ "$validation_result" -eq 0 ]; then
+        if echo "$GEOBLOCK_COUNTRIES" | grep -Eq '^([A-Z]{2})( +[A-Z]{2} *)*$'; then
           local count=$(
             set -- $GEOBLOCK_COUNTRIES
             echo $#
@@ -287,14 +341,14 @@ reload_config() {
         fi
       fi
 
-      reload_lockout_ipset "$read_ndm_lockout_old" "$READ_NDM_LOCKOUT_IPSETS" "$ndm_lockout_timeout_old" "$LOCKOUT_IPSET_BANTIME"
+      reload_ipset "ascn_ndm_lockout" "$read_ndm_lockout_old" "$READ_NDM_LOCKOUT_IPSETS" "$ndm_lockout_timeout_old" "$LOCKOUT_IPSET_BANTIME"
+      reload_ipset "ascn_honeypot" "$enable_honeypot_old" "$ENABLE_HONEYPOT" "$honeypot_timeout_old" "$HONEYPOT_BANTIME"
+
       reload_custom_ipset "$custom_lists_block_mode_old" "$CUSTOM_LISTS_BLOCK_MODE"
       reload_custom_exclude_ipset "$use_custom_exclude_list_old" "$USE_CUSTOM_EXCLUDE_LIST"
 
       reload_geo_ipset "$geoblock_mode_old" "$GEOBLOCK_MODE" "$geo_countries_old" "$GEOBLOCK_COUNTRIES"
       reload_geo_exclude_ipset "$geo_exclude_countries_old" "$GEO_EXCLUDE_COUNTRIES"
-
-      reload_honeypot_ipset "$enable_honeypot_old" "$ENABLE_HONEYPOT" "$honeypot_timeout_old" "$HONEYPOT_BANTIME"
 
       show_no_protection_warning
 
