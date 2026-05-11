@@ -8,6 +8,9 @@
 3) Блокировка хостов по пользовательскому черному/белому списку.
 4) Геоблокировка в режиме черного/белого списка.
 5) Блокировка хостов с помощью "ловушки" (honeypot).
+6) Блокировка по спискам NDMS (ip lockout-policy).
+7) Исключения по пользовательским спискам.
+8) Исключения по странам.
 
 > [!IMPORTANT]
 > Antiscan является IPv4-only, работает только для протокола TCP.
@@ -19,10 +22,21 @@
 1. Установленный компонент "Модули ядра для подсистемы Netfilter" (начиная с версии ПО 4.3 доступен без "Протокол IPv6").
 
 ### Установка:
-1. Выполнить команду `opkg update && opkg install curl && curl -fsSL https://raw.githubusercontent.com/dimon27254/antiscan/refs/heads/main/install.sh | sh`
-2. Указать unix-имена интерфейсов интернет-подключений в файле `"/opt/etc/antiscan/ascn.conf"`. В ПО версии 4.3 и выше просмотр unix-имен интерфейсов доступен по команде `show interface {интерфейс} system-name`
-3. Настроить остальные параметры под собственные нужды, если это требуется, в файле `"/opt/etc/antiscan/ascn.conf"`
-4. Запустить Antiscan командой `antiscan start`
+1) Выполнить команду установки.
+
+GitHub-репозиторий:
+
+`opkg update && opkg install curl && curl -fsSL https://raw.githubusercontent.com/dimon27254/antiscan/refs/heads/main/install.sh | sh`
+
+ИЛИ
+
+Российский репозиторий **bin.antiscan.ru**:
+
+`opkg update && opkg install curl && curl -fsSL https://bin.antiscan.ru/packages/install.sh | sh`
+
+2) Указать unix-имена интерфейсов интернет-подключений в файле `"/opt/etc/antiscan/ascn.conf"`. В ПО версии 4.3 и выше просмотр unix-имен интерфейсов доступен по команде `show interface {интерфейс} system-name`
+3) Настроить остальные параметры под собственные нужды, если это требуется, в файле `"/opt/etc/antiscan/ascn.conf"`
+4) Запустить Antiscan командой `antiscan start`
 
 **Для версий Antiscan 1.4 и выше доступна настройка с помощью [web4static](https://github.com/spatiumstas/web4static) от [spatiumstas](https://github.com/spatiumstas).**
 
