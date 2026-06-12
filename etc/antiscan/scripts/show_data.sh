@@ -1,5 +1,7 @@
 get_status() {
-    printf "Версия Antiscan:\t${BOLD_TEXT}$ASCN_VERSION${NO_STYLE}\n"
+    local new_version_info="$(check_updates)"
+    printf "Версия Antiscan:\t${BOLD_TEXT}$ASCN_VERSION${NO_STYLE}"
+    [ -n "$new_version_info" ] && printf " ${YELLOW_COLOR}(доступна ${new_version_info})${NO_STYLE}\n" || printf "\n"
     printf "Статус:\t\t\t"
     if ascn_is_running; then
         if config_is_reloading; then

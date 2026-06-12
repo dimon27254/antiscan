@@ -6,7 +6,7 @@ CRONTAB_FILE="$ANTISCAN_DIR/ascn_crontab.conf"
 ANTISCAN_SCRIPTS_DIR="$ANTISCAN_DIR/scripts"
 
 ASCN_TEMP_FILE="/tmp/ascn.run"
-ASCN_VERSION="1.10.1"
+ASCN_VERSION="1.10.2"
 
 PATH=/opt/bin:/opt/sbin:/sbin:/usr/sbin:/bin:/usr/bin
 
@@ -16,6 +16,7 @@ source "${ANTISCAN_SCRIPTS_DIR}/config.sh"
 source "${ANTISCAN_SCRIPTS_DIR}/iptables.sh"
 source "${ANTISCAN_SCRIPTS_DIR}/ipsets.sh"
 source "${ANTISCAN_SCRIPTS_DIR}/show_data.sh"
+source "${ANTISCAN_SCRIPTS_DIR}/check_updates.sh"
 
 read_config "$1"
 
@@ -34,6 +35,7 @@ start() {
       exit 2
     fi
 
+    check_updates 1
     update_cron
     load_kernel_modules
     write_temp_config

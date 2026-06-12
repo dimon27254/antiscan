@@ -483,7 +483,7 @@ read_ndm_ipsets() {
         else
             if [ -n "$(ipset -q -n list ascn_ndm_lockout)" ]; then
                 local ndm_sets="$(ipset list -n | grep -E '^_NDM_BFD_.+4$')"
-                local $ndm_set_ips=""
+                local ndm_set_ips=""
                 for ndm_set in $ndm_sets; do
                     local ndm_set_data="$(ipset save $ndm_set -q | tail -n +2 | sed "/127.0.0.1$/d; s/$ndm_set/ascn_ndm_lockout/")"
                     if [ -n "$ndm_set_data" ]; then

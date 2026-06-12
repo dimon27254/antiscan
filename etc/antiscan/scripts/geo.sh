@@ -65,7 +65,7 @@ download_geo_subnets() {
         printf "${YELLOW_COLOR}Пробуем загрузить ${NO_STYLE}${BOLD_TEXT}${country}${NO_STYLE}${YELLOW_COLOR} с зеркала...${NO_STYLE} "
         print_message "warning" "Пробуем загрузить ${country} с зеркала..." 0
         log_message="Повторная загрузка списка подсетей для страны ${country}"
-        curl --connect-timeout 30 --retry 5 --retry-delay 10 -fsS "${SUBNETS_MIRROR}/${country}.json" -o "$curl_temp_file_path" 2>/tmp/ascn_curl2_error
+        curl -A "Antiscan $ASCN_VERSION" --connect-timeout 30 --retry 5 --retry-delay 10 -fsS "${SUBNETS_MIRROR}/${country}.json" -o "$curl_temp_file_path" 2>/tmp/ascn_curl2_error
         curl2_result=$?
         if [ "$curl2_result" -ne 0 ]; then
           print_message "warning" "${log_message} завершилась неудачно" 0
