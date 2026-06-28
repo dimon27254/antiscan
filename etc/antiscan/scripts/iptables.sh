@@ -5,8 +5,12 @@ load_kernel_modules() {
       insmod "$xtrecent_mod_path" >/dev/null 2>&1
       print_message "notice" "xt_recent.ko загружен"
     else
-      print_message "error" "Не удалось найти модуль ядра xt_recent.ko"
-      exit 1
+      if ! iptables -A INPUT -w -t filter -s 127.0.0.1 -p tcp --dport 65502 -m conntrack --ctstate NEW -m recent --set --name test_recent >/dev/null 2>&1; then
+        print_message "error" "Не удалось найти модуль ядра xt_recent.ko"
+        exit 1
+      else
+        iptables -D INPUT -w -t filter -s 127.0.0.1 -p tcp --dport 65502 -m conntrack --ctstate NEW -m recent --set --name test_recent >/dev/null 2>&1
+      fi
     fi
   fi
 
@@ -16,8 +20,12 @@ load_kernel_modules() {
       insmod "$multiport_mod_path" >/dev/null 2>&1
       print_message "notice" "xt_multiport.ko загружен"
     else
-      print_message "error" "Не удалось найти модуль ядра xt_multiport.ko"
-      exit 1
+      if ! iptables -A INPUT -w -t filter -s 127.0.0.1 -p tcp -m multiport --dports 65500,65501 -j ACCEPT >/dev/null 2>&1; then
+        print_message "error" "Не удалось найти модуль ядра xt_multiport.ko"
+        exit 1
+      else
+        iptables -D INPUT -w -t filter -s 127.0.0.1 -p tcp -m multiport --dports 65500,65501 -j ACCEPT >/dev/null 2>&1
+      fi
     fi
   fi
 }

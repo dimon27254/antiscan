@@ -1,7 +1,18 @@
 get_status() {
-    local new_version_info="$(check_updates)"
+    local ascn_new_version=""
+
+    if ascn_update_info="$(check_updates 0)"; then
+        local ascn_legacy_update_available="$(echo $ascn_update_info | awk '{print $1}')"
+        local ascn_main_update_available="$(echo $ascn_update_info | awk '{print $2}')"
+        local SERVER_RESPONSE="$(cat /tmp/ascn_update.json)"
+        if [ "$ascn_legacy_update_available" == "1" ]; then
+            ascn_new_version=$(echo "$SERVER_RESPONSE" | jq -r '.legacy.packages[].antiscan.version' 2>/dev/null)
+        elif [ "$ascn_main_update_available" == "1" ]; then
+            ascn_new_version=$(echo "$SERVER_RESPONSE" | jq -r '.main.packages[].antiscan.version' 2>/dev/null)
+        fi
+    fi
     printf "Версия Antiscan:\t${BOLD_TEXT}$ASCN_VERSION${NO_STYLE}"
-    [ -n "$new_version_info" ] && printf " ${YELLOW_COLOR}(доступна ${new_version_info})${NO_STYLE}\n" || printf "\n"
+    [ -n "$ascn_new_version" ] && printf " ${YELLOW_COLOR}(доступна ${ascn_new_version})${NO_STYLE}\n" || printf "\n"
     printf "Статус:\t\t\t"
     if ascn_is_running; then
         if config_is_reloading; then

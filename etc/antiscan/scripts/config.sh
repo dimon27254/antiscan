@@ -28,6 +28,14 @@ read_config() {
   esac
 }
 
+read_config_without_check() {
+  if [ -f "$CONFIG_FILE_TEMP" ]; then
+    source "$CONFIG_FILE_TEMP"
+  else
+    source "$CONFIG_FILE"
+  fi
+}
+
 check_config() {
   if [ -z "$ISP_INTERFACES" ]; then
     print_message "error" "В ascn.conf не указаны интерфейсы!"

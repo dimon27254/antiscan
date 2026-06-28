@@ -118,6 +118,20 @@ restore_ipset_from_file() {
 load_custom_ipset() {
     local custom_ipset_tempfile="/tmp/ipset_custom.txt"
     local custom_ipset_filename="$ANTISCAN_DIR/$1.txt"
+    local ipset_name=""
+
+    case "$1" in
+    "ascn_custom_blacklist")
+        ipset_name="чёрном списке"
+        ;;
+    "ascn_custom_whitelist")
+        ipset_name="белом списке"
+        ;;
+    "ascn_custom_exclude")
+        ipset_name="списке исключений"
+        ;;
+    esac
+
     if [ -f "$custom_ipset_filename" ]; then
         local custom_file_size="$(ls -l "$custom_ipset_filename" | awk '{print $5}')"
         if [ "$custom_file_size" -gt 4 ]; then
@@ -125,16 +139,21 @@ load_custom_ipset() {
             sed -nE "s/^([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}(\/[0-9]{1,2})?).*/add $1 \1/p" "$custom_ipset_filename" >>"$custom_ipset_tempfile"
             if ! ipset -! restore <"$custom_ipset_tempfile"; then
                 print_message "error" "Не удалось импортировать список $1!"
+                rm "$custom_ipset_tempfile"
+                return 1
             fi
             rm "$custom_ipset_tempfile"
+            return 0
         else
-            print_message "error" "В файле $1 отсутствуют IP-адреса."
+            print_message "error" "В пользовательском $ipset_name отсутствуют IP-адреса."
             print_message "error" "Добавьте их и перезапустите Antiscan."
+            return 1
         fi
     else
         echo >"$custom_ipset_filename"
         print_message "warning" "Файл $1 отсутствовал и был создан автоматически." 1
         print_message "error" "Добавьте в него IP-адреса и перезапустите Antiscan."
+        return 1
     fi
 }
 
@@ -373,27 +392,19 @@ update_ipsets() {
                 exit 2
             else
                 if [ "$1" == "custom" ]; then
-                    if [ "$CUSTOM_LISTS_BLOCK_MODE" == "blacklist" ] || [ "$CUSTOM_LISTS_BLOCK_MODE" == "whitelist" ]; then
-                        local ipset_custom_name="ascn_custom_${CUSTOM_LISTS_BLOCK_MODE}"
-                        if [ -n "$(ipset -q -n list $ipset_custom_name)" ]; then
-                            ipset flush "$ipset_custom_name"
-                            load_custom_ipset "$ipset_custom_name"
-                        else
-                            remove_rules
-                            load_custom_ipset "$ipset_custom_name"
-                            add_rules
+                    local load_error=0
+                    ipsets_update_list=""
+                    [ "$CUSTOM_LISTS_BLOCK_MODE" == "blacklist" ] || [ "$CUSTOM_LISTS_BLOCK_MODE" == "whitelist" ] && ipsets_update_list="ascn_custom_${CUSTOM_LISTS_BLOCK_MODE}"
+                    [ "$USE_CUSTOM_EXCLUDE_LIST" == "1" ] && ipsets_update_list="${ipsets_update_list} ascn_custom_exclude"
+                    remove_rules
+                    for ipset_to_upd in $ipsets_update_list; do
+                        [ -n "$(ipset -q -n list $ipset_to_upd)" ] && ipset destroy "$ipset_to_upd"
+                        if ! load_custom_ipset "$ipset_to_upd"; then
+                            load_error=1
                         fi
-                    fi
-                    if [ "$USE_CUSTOM_EXCLUDE_LIST" == "1" ]; then
-                        if [ -n "$(ipset -q -n list ascn_custom_exclude)" ]; then
-                            ipset flush ascn_custom_exclude
-                            load_custom_ipset "ascn_custom_exclude"
-                        else
-                            remove_rules
-                            load_custom_ipset "ascn_custom_exclude"
-                            add_rules
-                        fi
-                    fi
+                    done
+                    add_rules
+                    [ "$load_error" -eq 1 ] && return 1 || return 0
                 else
                     force_reload_geo_ipsets
                 fi
