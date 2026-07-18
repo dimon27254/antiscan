@@ -14,17 +14,17 @@ concurrency:
 
 jobs:
   build-package:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Build package
         run: make package
 
       - name: Upload files
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: package
           path: ./out/antiscan_*_all.ipk
@@ -37,12 +37,12 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
 
   create-release:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     needs: [build-package]
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Read version
         id: version
@@ -51,7 +51,7 @@ jobs:
           echo "content=$version" >> $GITHUB_OUTPUT
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: out
 
@@ -67,26 +67,26 @@ jobs:
           git push
 
       - name: Create and upload release
-        uses: softprops/action-gh-release@v2.3.2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.version.outputs.content }}
           make_latest: true
-          files: ./out/package/antiscan_${{ steps.version.outputs.content }}_all.ipk
+          files: ./out/antiscan_${{ steps.version.outputs.content }}_all.ipk
 
       - name: Summary
         run: |
           echo "Release ${{ steps.version.outputs.content }} created" >> $GITHUB_STEP_SUMMARY
 
   build-repository:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     needs: [build-package]
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: out
           merge-multiple: true
@@ -98,7 +98,7 @@ jobs:
         run: make repository
 
       - name: Upload pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: ./out/_pages
 
@@ -109,16 +109,16 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
 
   deploy-repository:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     needs: [build-repository]
 
     steps:
       - name: Setup Pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
 
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
 
       - name: Summary
         run: |

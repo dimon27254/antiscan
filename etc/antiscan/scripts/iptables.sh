@@ -199,12 +199,12 @@ update_iptables() {
     done
     if config_is_reloading; then
       log_message="${log_message} неудачно"
-      print_message "warning" "${log_message}" 1
+      print_message "warning" "${log_message}"
       exit 2
     else
       if [ $wait_timeout -ne 15 ]; then
         log_message="${log_message} успешно"
-        print_message "warning" "${log_message}" 1
+        print_message "warning" "${log_message}"
       fi
       add_rules
     fi

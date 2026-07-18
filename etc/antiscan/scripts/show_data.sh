@@ -186,7 +186,7 @@ show_ipsets() {
 
 show_version() {
     if [ "$1" == "opkg" ]; then
-        local ascn_opkg_version="$(opkg list-installed antiscan | awk '{print $3}')"
+        local ascn_opkg_version="$(grep -s "Version:" /opt/lib/opkg/info/antiscan.control | sed 's/Version: //')"
         if [ -z "$ascn_opkg_version" ]; then
             print_message "console" "Не удалось определить версию пакета Antiscan"
         else

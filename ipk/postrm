@@ -1,7 +1,19 @@
 #!/bin/sh
 crontab_bin="/opt/bin/crontab"
+ascn_update_cache="/tmp/ascn_update.json"
+ascn_rci_cache="/tmp/ascn_rci.json"
+ascn_rci_auth_file="/tmp/ascn_rci_auth"
+ascn_ignore_token_file="/tmp/ascn_ignore_token"
+
 if [ -f "$crontab_bin" ]; then
   crontab -l | sed '/S99ascn/d' | crontab -
 else
   echo "crontab не найден! У вас не установлен cron?"
 fi
+
+[ -f "$ascn_update_cache" ] && rm -f "$ascn_update_cache" || true
+[ -f "$ascn_rci_cache" ] && rm -f "$ascn_rci_cache" || true
+[ -f "$ascn_rci_auth_file" ] && rm -f "$ascn_rci_auth_file" || true
+[ -f "$ascn_ignore_token_file" ] && rm -f "$ascn_ignore_token_file" || true
+
+exit 0

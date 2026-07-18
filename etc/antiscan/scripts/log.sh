@@ -7,21 +7,41 @@ NO_STYLE="\033[0m"
 print_message() {
     local msg_type="$1"
     local msg_text="$2"
-    if [ "$msg_type" != "console" ]; then
-        logger -p "${msg_type}" -t "Antiscan" "${msg_text}"
-    fi
+    local print_param="$3"
+    local no_log="$4"
+
+    local escaped_text="$(echo "$msg_text" | sed 's/%/%%/g')"
+
     case $msg_type in
     error)
-        [ -z "$3" ] && printf "${RED_COLOR}${msg_text}${NO_STYLE}\n" >&2
+        if [ -z "$print_param" ]; then
+            printf "${RED_COLOR}${escaped_text}${NO_STYLE}\n" >&2
+        fi
         ;;
     notice)
-        [ -z "$3" ] && printf "${BOLD_TEXT}${msg_text}${NO_STYLE}\n"
+        if [ -z "$print_param" ]; then
+            printf "${BOLD_TEXT}${escaped_text}${NO_STYLE}\n"
+        fi
         ;;
     warning)
-        [ "$3" == "1" ] && printf "${YELLOW_COLOR}${msg_text}${NO_STYLE}\n" >&2
+        if [ -z "$print_param" ]; then
+            printf "${YELLOW_COLOR}${escaped_text}${NO_STYLE}\n" >&2
+        fi
         ;;
     console)
-        printf "${BOLD_TEXT}${msg_text}${NO_STYLE}\n"
+        if [ -z "$print_param" ]; then
+            printf "${BOLD_TEXT}${escaped_text}${NO_STYLE}\n"
+        fi
+        ;;
+    success)
+        if [ -z "$print_param" ]; then
+            printf "${GREEN_COLOR}${escaped_text}${NO_STYLE}\n"
+        fi
         ;;
     esac
+
+    if [ "$msg_type" != "console" ] && [ "$no_log" != "1" ]; then
+        [ "$msg_type" == "success" ] && msg_type="warning"
+        logger -p "${msg_type}" -t "Antiscan" "${msg_text}"
+    fi
 }

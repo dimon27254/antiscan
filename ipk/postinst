@@ -3,8 +3,28 @@ ANTISCAN_LINK="/opt/bin/antiscan"
 ANTISCAN_DIR="/opt/etc/antiscan"
 CONFIG_FILE="$ANTISCAN_DIR/ascn.conf"
 OLD_CONFIG_FILES="/opt/etc/ascn.conf-opkg /opt/etc/ascn.conf-opkg.backup"
+CRONTABS_DIR="/opt/var/spool/cron/crontabs"
+
+RED_COLOR="\033[1;31m"
+GREEN_COLOR="\033[1;32m"
 BOLD_TEXT="\033[1m"
 NO_STYLE="\033[0m"
+
+print_message() {
+    msg_type="$1"
+    msg_text="$2"
+    case $msg_type in
+    error)
+        printf "${RED_COLOR}${msg_text}${NO_STYLE}\n" >&2
+        ;;
+    notice)
+        printf "${BOLD_TEXT}${msg_text}${NO_STYLE}\n"
+        ;;
+    success)
+        printf "${GREEN_COLOR}${msg_text}${NO_STYLE}\n"
+        ;;
+    esac
+}
 
 if [ ! -L "$ANTISCAN_LINK" ]; then
     ln -s /opt/etc/init.d/S99ascn "$ANTISCAN_LINK"
@@ -35,3 +55,22 @@ for old_file in $OLD_CONFIG_FILES; do
         rm "$old_file"
     fi
 done
+
+if [ ! -d "$CRONTABS_DIR" ]; then
+    print_message "notice" "Настраиваем cron..."
+    mkdir -p "$CRONTABS_DIR"
+    if ! crontab -l >/dev/null 2>&1; then
+        echo | crontab -
+    fi
+    sed -i 's/="-s"/=""/' "/opt/etc/init.d/S10cron"
+    if "/opt/etc/init.d/S10cron" start; then
+        print_message "success" "Cron готов к работе"
+    else
+        print_message "error" "Не удалось запустить cron"
+        return 1
+    fi
+fi
+
+ASCN_START_AFTER_INSTALL=1 /opt/etc/init.d/S99ascn start
+
+exit 0

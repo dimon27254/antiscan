@@ -361,9 +361,7 @@ reload_config() {
       show_no_protection_warning
 
       if [ -n "$IPSETS_DIRECTORY" ] && [ "$ipsets_dir_old" != "$IPSETS_DIRECTORY" ]; then
-        msg_to_print="Перезапустите Antiscan, чтобы начать работу с новым каталогом хранения списков."
-        printf "${YELLOW_COLOR}${msg_to_print}${NO_STYLE}\n"
-        print_message "warning" "${msg_to_print}"
+        print_message "warning" "Перезапустите Antiscan, чтобы начать работу с новым каталогом хранения списков."
       fi
 
       add_rules

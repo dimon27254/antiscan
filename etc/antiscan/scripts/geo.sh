@@ -55,7 +55,7 @@ download_geo_subnets() {
       local curl1_error_text=""
       local curl2_error_text=""
       if [ "$curl1_result" -ne 0 ]; then
-        print_message "warning" "${log_message} завершилась неудачно" 0
+        print_message "warning" "${log_message} завершилась неудачно" 1
         printf "${RED_COLOR}неудачно${NO_STYLE}\n"
         if [ -s "/tmp/ascn_curl1_error" ]; then
           curl1_error_text="$(cat /tmp/ascn_curl1_error)"
@@ -63,12 +63,12 @@ download_geo_subnets() {
           printf "${RED_COLOR}${curl1_error_text}${NO_STYLE}\n"
         fi
         printf "${YELLOW_COLOR}Пробуем загрузить ${NO_STYLE}${BOLD_TEXT}${country}${NO_STYLE}${YELLOW_COLOR} с зеркала...${NO_STYLE} "
-        print_message "warning" "Пробуем загрузить ${country} с зеркала..." 0
+        print_message "warning" "Пробуем загрузить ${country} с зеркала..." 1
         log_message="Повторная загрузка списка подсетей для страны ${country}"
-        curl -A "Antiscan $ASCN_VERSION" --connect-timeout 30 --retry 5 --retry-delay 10 --max-time 60 -fsS "${SUBNETS_MIRROR}/${country}.json" -o "$curl_temp_file_path" 2>/tmp/ascn_curl2_error
+        curl -A "$ASCN_USERAGENT" --connect-timeout 30 --retry 5 --retry-delay 10 --max-time 60 -fsS "${SUBNETS_MIRROR}/${country}.json" -o "$curl_temp_file_path" 2>/tmp/ascn_curl2_error
         curl2_result=$?
         if [ "$curl2_result" -ne 0 ]; then
-          print_message "warning" "${log_message} завершилась неудачно" 0
+          print_message "warning" "${log_message} завершилась неудачно" 1
           printf "${RED_COLOR}неудачно${NO_STYLE}\n"
           if [ -s "/tmp/ascn_curl2_error" ]; then
             curl2_error_text="$(cat /tmp/ascn_curl2_error)"
@@ -83,7 +83,7 @@ download_geo_subnets() {
         jq -r '.data.resources.ipv4[]' "$curl_temp_file_path" 2>"/tmp/ascn_jq_error" >"$geo_subnets_file"
         local parse_result=$?
         if [ "$parse_result" -ne 0 ]; then
-          print_message "warning" "${log_message} завершилась неудачно" 0
+          print_message "warning" "${log_message} завершилась неудачно" 1
           printf "${RED_COLOR}неудачно${NO_STYLE}\n"
           if [ -s "/tmp/ascn_jq_error" ]; then
             jq_error_text="$(cat /tmp/ascn_jq_error)"
@@ -107,7 +107,7 @@ download_geo_subnets() {
           print_message "notice" "${log_message} выполнена успешно" 1
         else
           printf "${RED_COLOR}неудачно${NO_STYLE}\n"
-          print_message "warning" "${log_message} завершилась неудачно" 0
+          print_message "warning" "${log_message} завершилась неудачно" 1
           print_message "warning" "Файл ${country}.txt не содержит подсетей" 1
         fi
       fi

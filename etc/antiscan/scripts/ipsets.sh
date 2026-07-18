@@ -151,7 +151,7 @@ load_custom_ipset() {
         fi
     else
         echo >"$custom_ipset_filename"
-        print_message "warning" "Файл $1 отсутствовал и был создан автоматически." 1
+        print_message "warning" "Файл $1 отсутствовал и был создан автоматически."
         print_message "error" "Добавьте в него IP-адреса и перезапустите Antiscan."
         return 1
     fi
@@ -339,15 +339,11 @@ flush_ipsets() {
                             delete_ipset "custom" "$custom_cleared_list"
                             local list_name=""
                             [ "$custom_cleared_list" == "blacklist" ] && list_name="черному" || list_name="белому"
-                            msg_to_print="Блокировка по пользовательскому $list_name списку отключена. Внесите новые записи и перезапустите Antiscan."
-                            printf "${YELLOW_COLOR}${msg_to_print}${NO_STYLE}\n"
-                            print_message "warning" "${msg_to_print}"
+                            print_message "warning" "Блокировка по пользовательскому $list_name списку отключена. Внесите новые записи и перезапустите Antiscan."
                         fi
                         if [ "$geo_cleared" == "1" ] && [[ "$GEOBLOCK_MODE" == "blacklist" || "$GEOBLOCK_MODE" == "whitelist" || -n "$GEO_EXCLUDE_COUNTRIES" ]]; then
                             delete_ipset "geo" "$GEOBLOCK_MODE"
-                            msg_to_print="Перезапустите Antiscan, чтобы повторно загрузить список подсетей стран и начать их использование."
-                            printf "${YELLOW_COLOR}${msg_to_print}${NO_STYLE}\n"
-                            print_message "warning" "${msg_to_print}"
+                            print_message "warning" "Перезапустите Antiscan, чтобы повторно загрузить список подсетей стран и начать их использование."
                         fi
                     fi
                     if [ "$lockout_cleared" == "1" ] && [ "$READ_NDM_LOCKOUT_IPSETS" == "1" ]; then
@@ -357,9 +353,7 @@ flush_ipsets() {
                             [ -n "$ndm_ipset_data" ] && ndmset_has_ips=1
                         done
                         if [ "$ndmset_has_ips" == "1" ]; then
-                            msg_to_print="Блокировка будет снята, когда система очистит собственные списки ограничения доступа."
-                            printf "${YELLOW_COLOR}${msg_to_print}${NO_STYLE}\n"
-                            print_message "warning" "${msg_to_print}"
+                            print_message "warning" "Блокировка будет снята, когда система очистит собственные списки ограничения доступа."
                         fi
                     fi
                 fi
