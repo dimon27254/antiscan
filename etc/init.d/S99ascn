@@ -7,7 +7,7 @@ ANTISCAN_SCRIPTS_DIR="$ANTISCAN_DIR/scripts"
 
 ASCN_TEMP_FILE="/tmp/ascn.run"
 ASCN_VERSION="1.10.4"
-ASCN_USERAGENT="Antiscan $ASCN_VERSION"
+ASCN_USERAGENT="Antiscan/$ASCN_VERSION"
 
 PATH=/opt/bin:/opt/sbin:/sbin:/usr/sbin:/bin:/usr/bin
 
