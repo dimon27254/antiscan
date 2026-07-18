@@ -9,7 +9,7 @@ _conffiles:
 _control:
 	echo "Package: antiscan" > out/$(BUILD_DIR)/control/control
 	echo "Version: $(VERSION)" >> out/$(BUILD_DIR)/control/control
-	echo "Depends: libc, libssp, librt, libpthread, ipset, iptables, curl, jq" >> out/$(BUILD_DIR)/control/control
+	echo "Depends: libc, libssp, librt, libpthread, ipset, iptables, curl, jq, cron" >> out/$(BUILD_DIR)/control/control
 	echo "License: MIT" >> out/$(BUILD_DIR)/control/control
 	echo "Section: net" >> out/$(BUILD_DIR)/control/control
 	echo "URL: https://github.com/dimon27254/antiscan" >> out/$(BUILD_DIR)/control/control

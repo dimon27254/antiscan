@@ -30,7 +30,7 @@ _repository:
 
 	echo "Package: antiscan" > out/_pages/$(BUILD_DIR)/Packages
 	echo "Version: $(VERSION)" >> out/_pages/$(BUILD_DIR)/Packages
-	echo "Depends: libc, libssp, librt, libpthread, ipset, iptables, curl, jq" >> out/_pages/$(BUILD_DIR)/Packages
+	echo "Depends: libc, libssp, librt, libpthread, ipset, iptables, curl, jq, cron" >> out/_pages/$(BUILD_DIR)/Packages
 	echo "Section: net" >> out/_pages/$(BUILD_DIR)/Packages
 	echo "Architecture: all" >> out/_pages/$(BUILD_DIR)/Packages
 	echo "Filename: $(FILENAME)" >> out/_pages/$(BUILD_DIR)/Packages
