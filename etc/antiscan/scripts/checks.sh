@@ -199,7 +199,7 @@ download_data() {
     fi
 
     if [ "$update_cache" -eq 1 ]; then
-        if ! _checks_curl "$req_type" --connect-timeout 5 --retry 5 --retry-delay 3 --max-time 10 -kfs "$data_url" -o "$data_cache"; then
+        if ! _checks_curl "$req_type" --connect-timeout 5 --retry 5 --retry-delay 5 --retry-connrefused --max-time 10 -kfs "$data_url" -o "$data_cache"; then
             [ -f "$data_cache" ] && rm -f "$data_cache"
             return 1
         fi

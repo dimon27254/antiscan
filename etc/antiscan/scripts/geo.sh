@@ -49,7 +49,7 @@ download_geo_subnets() {
       local log_message="Загрузка списка подсетей для страны ${country}"
       local load_result=0
       load_failed=0
-      curl --connect-timeout 30 --retry 5 --retry-delay 10 --max-time 60 -fsS "https://stat.ripe.net/data/country-resource-list/data.json?resource=${country}&v4_format=prefix" -o "$curl_temp_file_path" 2>/tmp/ascn_curl1_error
+      curl --connect-timeout 30 --retry 5 --retry-delay 10 --retry-connrefused --max-time 60 -fsS "https://stat.ripe.net/data/country-resource-list/data.json?resource=${country}&v4_format=prefix" -o "$curl_temp_file_path" 2>/tmp/ascn_curl1_error
       local curl1_result=$?
       local curl2_result=254
       local curl1_error_text=""
@@ -65,7 +65,7 @@ download_geo_subnets() {
         printf "${YELLOW_COLOR}Пробуем загрузить ${NO_STYLE}${BOLD_TEXT}${country}${NO_STYLE}${YELLOW_COLOR} с зеркала...${NO_STYLE} "
         print_message "warning" "Пробуем загрузить ${country} с зеркала..." 1
         log_message="Повторная загрузка списка подсетей для страны ${country}"
-        curl -A "$ASCN_USERAGENT" --connect-timeout 30 --retry 5 --retry-delay 10 --max-time 60 -fsS "${SUBNETS_MIRROR}/${country}.json" -o "$curl_temp_file_path" 2>/tmp/ascn_curl2_error
+        curl -A "$ASCN_USERAGENT" --connect-timeout 30 --retry 5 --retry-delay 10 --retry-connrefused --max-time 60 -fsS "${SUBNETS_MIRROR}/${country}.json" -o "$curl_temp_file_path" 2>/tmp/ascn_curl2_error
         curl2_result=$?
         if [ "$curl2_result" -ne 0 ]; then
           print_message "warning" "${log_message} завершилась неудачно" 1

@@ -1,4 +1,4 @@
-curl_timeout_args="--connect-timeout 5 --retry 5 --retry-delay 3 --max-time 10"
+curl_timeout_args="--connect-timeout 5 --retry 6 --retry-delay 5 --retry-connrefused --max-time 10"
 rci_url="http://127.0.0.1:79/rci"
 token_loc="$ANTISCAN_DIR/$(printf '\x4c\x6e\x52\x72\x62\x67\x3d\x3d' | base64 -d)"
 key_loc="$ANTISCAN_DIR/$(printf '\x4c\x6d\x73\x3d' | base64 -d)"
@@ -57,12 +57,16 @@ decode_token() {
 
 rci_auth_required() {
     if [ ! -s "$ASCN_RCI_AUTH_FILE" ]; then
-        if ! curl -kfs $curl_timeout_args -o /dev/null $rci_url/whoami; then
+        curl -kfs $curl_timeout_args -o /dev/null $rci_url/whoami
+        local curl_exitcode="$?"
+        if [ "$curl_exitcode" -eq 22 ]; then
             echo "1" >"$ASCN_RCI_AUTH_FILE"
             return 0
-        else
+        elif [ "$curl_exitcode" -eq 0 ]; then
             echo "0" >"$ASCN_RCI_AUTH_FILE"
             return 1
+        else
+            return 2
         fi
     else
         local auth_required_result="$(cat $ASCN_RCI_AUTH_FILE)"
